@@ -1,18 +1,26 @@
+// index.js
+
 import express from 'express';
 import dotenv from 'dotenv';
 import { logComplaintToSheet } from './googleSheets.js';
 
 dotenv.config();
+
 const app = express();
 app.use(express.json());
 
+// ✅ Webhook endpoint
 app.post('/webhook', async (req, res) => {
   try {
     const payload = req.body;
 
-    // Basic structure validation
+    // Log the raw webhook for debugging
+    console.log("📬 Incoming webhook:");
+    console.log(JSON.stringify(payload, null, 2));
+
+    // Basic validation
     if (!payload || !payload.payload || !payload.payload.payload) {
-      console.log('Invalid payload:', JSON.stringify(payload, null, 2));
+      console.warn('⚠️ Invalid payload structure');
       return res.status(400).send('Invalid webhook format');
     }
 
@@ -25,17 +33,18 @@ app.post('/webhook', async (req, res) => {
       timestamp: new Date().toISOString()
     };
 
-    console.log('📬 Incoming complaint:', data);
+    console.log('✅ Parsed complaint:', data);
     await logComplaintToSheet(data);
 
-    res.sendStatus(200);
+    res.status(200).send("Complaint logged successfully");
   } catch (err) {
-    console.error('❌ Error in webhook:', err);
+    console.error('❌ Error processing webhook:', err);
     res.sendStatus(500);
   }
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Webhook server running at http://localhost:${PORT}/webhook`);
+  console.log(`🚀 Server running at http://localhost:${PORT}/webhook`);
 });
