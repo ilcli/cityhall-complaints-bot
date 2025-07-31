@@ -1,50 +1,42 @@
-// index.js
-
 import express from 'express';
-import dotenv from 'dotenv';
+import { analyzeComplaint } from './analyzeComplaint.js';
 import { logComplaintToSheet } from './googleSheets.js';
 
-dotenv.config();
-
 const app = express();
+const PORT = process.env.PORT || 8080;
+
 app.use(express.json());
 
-// ✅ Webhook endpoint
+app.get('/', (req, res) => {
+  res.send('City Hall Complaints Bot is running.');
+});
+
 app.post('/webhook', async (req, res) => {
   try {
-    const payload = req.body;
-
-    // Log the raw webhook for debugging
-    console.log("📬 Incoming webhook:");
-    console.log(JSON.stringify(payload, null, 2));
-
-    // Basic validation
-    if (!payload || !payload.payload || !payload.payload.payload) {
-      console.warn('⚠️ Invalid payload structure');
-      return res.status(400).send('Invalid webhook format');
+    const payload = req.body.payload?.payload;
+    if (!payload?.text || !payload?.sender?.phone) {
+      console.error('❌ Invalid webhook payload');
+      return res.status(400).send('Invalid payload');
     }
 
-    const msg = payload.payload.payload;
+    const message = payload.text;
+    const timestamp = new Date().toISOString();
+    const imageUrl = ''; // Will be populated later if image-handling logic is added
 
-    const data = {
-      from: msg.sender?.phone || 'Unknown',
-      message: msg.text || JSON.stringify(msg),
-      chatName: msg.sender?.name || 'Unknown',
-      timestamp: new Date().toISOString()
-    };
+    console.log('📩 New incoming message:', message);
 
-    console.log('✅ Parsed complaint:', data);
-    await logComplaintToSheet(data);
+    const structured = await analyzeComplaint({ message, timestamp, imageUrl });
+    console.log('🧠 Parsed structure:', structured);
 
-    res.status(200).send("Complaint logged successfully");
-  } catch (err) {
-    console.error('❌ Error processing webhook:', err);
-    res.sendStatus(500);
+    await logComplaintToSheet(structured);
+
+    res.send('✅ Complaint logged successfully');
+  } catch (error) {
+    console.error('❌ Error processing webhook:', error);
+    res.status(500).send('Internal Server Error');
   }
 });
 
-// Start server
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}/webhook`);
 });
