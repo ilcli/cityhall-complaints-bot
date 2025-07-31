@@ -4,9 +4,18 @@ import fs from 'fs';
 const SHEET_ID = process.env.SHEET_ID;
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 
-// Load your service account credentials
+const credsPath = './creds/service-account.json';
+
+// 🔍 Confirm the file exists BEFORE using it
+console.log('🔍 Checking for service-account.json...');
+console.log('✔️ JSON file exists:', fs.existsSync(credsPath));
+
+if (!fs.existsSync(credsPath)) {
+  throw new Error('❌ service-account.json is missing at ./creds/service-account.json');
+}
+
 const auth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(fs.readFileSync('./creds/service-account.json', 'utf-8')),
+  credentials: JSON.parse(fs.readFileSync(credsPath, 'utf-8')),
   scopes: SCOPES
 });
 
