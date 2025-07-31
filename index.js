@@ -1,5 +1,5 @@
 import express from 'express';
-import { analyzeComplaint } from './analyzeComplaintAI.js';
+import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { logComplaintToSheet } from './googleSheets.js';
 
 const app = express();
