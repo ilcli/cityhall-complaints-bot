@@ -27,3 +27,4 @@ coverage/
 .Trashes
 ehthumbs.db
 Thumbs.dbcreds/service-account.json
+creds/service-account.json
