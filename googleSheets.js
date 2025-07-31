@@ -24,13 +24,18 @@ export async function logComplaintToSheet({ from, message, chatName, timestamp }
   const sheets = google.sheets({ version: 'v4', auth: client });
 
   const values = [[timestamp, from, message, chatName]];
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID,
-    range: 'Sheet1!A:D',
-    valueInputOption: 'RAW',
-    resource: { values }
-  });
-
-  console.log('✅ Complaint logged to Google Sheet.');
+  
+  console.log("📄 SHEET_ID:", SHEET_ID);
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: 'Sheet1!A:D',
+      valueInputOption: 'RAW',
+      resource: { values }
+    });
+    console.log('✅ Complaint logged to Google Sheet.');
+  } catch (err) {
+    console.error('❌ Google Sheets API error:', err.message);
+    throw err;
+  }
 }
