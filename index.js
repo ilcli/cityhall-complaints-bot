@@ -23,12 +23,12 @@ app.post('/webhook', async (req, res) => {
   try {
     const { type: webhookType, payload } = req.body;
 
-    if (webhookType !== 'message-event') {
+    if (webhookType !== 'message') {
       console.log('⚠️ Ignored non-message event:', webhookType);
       return res.status(200).send('Ignored');
     }
 
-    const content = payload?.payload;
+    const content = payload;
     const sender = content?.sender?.phone;
     const timestampMsRaw = content?.timestamp;
     const timestampMs = parseInt(timestampMsRaw);
@@ -48,17 +48,11 @@ app.post('/webhook', async (req, res) => {
       .setZone('Asia/Jerusalem')
       .toFormat('HH:mm dd-MM-yy');
 
-    // Infer message type based on content structure
-    let messageType = '';
-    if (content?.type) {
-      messageType = content.type;
-    } else if (content?.url || content?.mediaUrl) {
-      messageType = 'image';
-    } else if (typeof content?.payload === 'string') {
-      messageType = 'text';
-    } else {
-      console.warn('❌ Unsupported or unknown message type');
-      return res.status(400).send('Unsupported message type');
+    // Get message type from content
+    const messageType = content?.type;
+    if (!messageType) {
+      console.warn('❌ Missing message type');
+      return res.status(400).send('Missing message type');
     }
 
     // Extract message text or image
@@ -66,12 +60,12 @@ app.post('/webhook', async (req, res) => {
     let imageUrl = null;
 
     if (messageType === 'text') {
-      messageText = content.payload;
+      messageText = content.payload?.text || content.payload || '';
       recentMessages.set(sender, { message: messageText, timestamp: timestampMs });
 
     } else if (messageType === 'image') {
-      const caption = content.payload || ''; // optional
-      imageUrl = content.url || content.mediaUrl || '';
+      const caption = content.payload?.caption || '';
+      imageUrl = content.payload?.url || '';
 
       if (caption) {
         messageText = caption;
