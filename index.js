@@ -3,7 +3,7 @@
 
 import express from 'express';
 import bodyParser from 'body-parser';
-import { analyzeComplaint } from './analyzeComplaint.js';
+import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet } from './googleSheets.js';
 import { DateTime } from 'luxon';
 
