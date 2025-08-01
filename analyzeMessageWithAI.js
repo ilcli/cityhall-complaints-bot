@@ -1,62 +1,63 @@
-import axios from 'axios';
+import fetch from 'node-fetch';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "deepseek-chat"; // Optional fallback
+export async function analyzeComplaint({ message, timestamp, imageUrl }) {
+  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+  const model = 'openrouter/auto'; // Or explicitly set model
 
-export async function analyzeComplaint({ message, timestamp, imageUrl = '' }) {
-  try {
-    const prompt = `
-ההודעה הבאה נשלחה לאנשי העירייה. פענח את הפרטים הרלוונטיים, החזר מבנה JSON המכיל את השדות הבאים:
+  const prompt = `
+הודעה חדשה התקבלה במערכת פניות הציבור. נתח את הטקסט הבא והחזר תשובה בפורמט JSON עם השדות הבאים:
 
-- "category": התחום הרלוונטי בעירייה (תאורה, ניקיון, תחבורה, מים, פיקוח, שירות לקוחות וכו')
-- "name": שם הפונה אם צויין
-- "phone": מספר הטלפון של הפונה אם צויין
-- "notes": הערות נוספות
-- "urgency": נמוכה, בינונית, גבוהה
-- "type": תלונה / בקשה / הצעה / תודה
+- "שם הפונה": אם נמסר בגוף ההודעה
+- "קטגוריה": סיווג הפנייה (כמו תאורה, ניקיון, תחבורה, ביטחון וכו')
+- "רמת דחיפות": רגילה / גבוהה / מיידית
+- "תוכן הפנייה": הטקסט המקורי
+- "תאריך ושעה": פורמט HH:mm DD-MM-YY לפי שעון ישראל
+- "טלפון": מספר הטלפון של הפונה
+- "קישור לתמונה": אם קיים
+- "סוג הפנייה": תלונה / בקשה / מחמאה / אחר
+- "מחלקה אחראית": מחלקה רלוונטית בעירייה (כמו תברואה, חשמל, גינון וכו')
 
-ההודעה:
-"""${message}"""
-`;
+הודעה: """${message}"""
+טלפון: ${message?.phone || 'לא צוין'}
+תמונה: ${imageUrl || 'אין'}
+תאריך ושעה: ${timestamp}
+  `;
 
-    const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-      model: OPENROUTER_MODEL,
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
       messages: [
-        { role: 'system', content: 'אתה עוזר עירוני לניתוח פניות בעברית.' },
-        { role: 'user', content: prompt }
-      ]
-    }, {
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    }),
+  });
 
-    const parsed = JSON.parse(response.data.choices[0].message.content);
+  if (!response.ok) {
+    console.error(`OpenRouter error: ${response.statusText}`);
+    return {};
+  }
 
-    return {
-      timestamp,
-      message,
-      chatName: parsed.name || '',
-      from: parsed.phone || '',
-      imageUrl,
-      category: parsed.category || '',
-      urgency: parsed.urgency || '',
-      type: parsed.type || '',
-      notes: parsed.notes || ''
-    };
+  const data = await response.json();
+
+  const rawText = data?.choices?.[0]?.message?.content;
+  try {
+    const parsed = JSON.parse(rawText);
+    return parsed;
   } catch (err) {
-    console.error('❌ שגיאה בניתוח הפנייה:', err.message);
+    console.error('Failed to parse OpenRouter response:', rawText);
     return {
-      timestamp,
-      message,
-      chatName: '',
-      from: '',
-      imageUrl,
-      category: '',
-      urgency: '',
-      type: '',
-      notes: ''
+      'תוכן הפנייה': message,
+      'תאריך ושעה': timestamp,
+      'טלפון': message?.phone || '',
+      'קישור לתמונה': imageUrl || '',
     };
   }
 }
