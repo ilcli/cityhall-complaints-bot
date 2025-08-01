@@ -1,9 +1,10 @@
 import express from 'express';
 import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
+import { DateTime } from 'luxon';
+
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet } from './googleSheets.js';
-import { DateTime } from 'luxon';
-import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -36,7 +37,7 @@ app.post('/webhook', async (req, res) => {
     const analysis = await analyzeComplaint({
       message: messageText,
       timestamp,
-      imageUrl: null,
+      imageUrl: null, // Add media support later
     });
 
     const row = {
@@ -58,4 +59,14 @@ app.post('/webhook', async (req, res) => {
     return res.status(200).send('OK');
   } catch (err) {
     console.error('❌ Error in /webhook handler:', err);
-    return res.status(500).s
+    return res.status(500).send('Internal Server Error');
+  }
+});
+
+app.get('/', (req, res) => {
+  res.send('City Hall Complaint Bot is running.');
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server live on port ${PORT}`);
+});
