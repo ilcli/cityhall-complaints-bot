@@ -5,7 +5,7 @@ const SHEET_ID = process.env.SHEET_ID;
 const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 const credsPath = './creds/service-account.json';
 
-// 🔨 Write creds file from env variable if needed
+// 🔐 Write creds file from env variable if needed
 if (!fs.existsSync('./creds')) {
   fs.mkdirSync('./creds', { recursive: true });
 }
@@ -23,32 +23,30 @@ const auth = new google.auth.GoogleAuth({
   scopes: SCOPES,
 });
 
-export async function logComplaintToSheet({ from, message, chatName, timestamp, imageUrl = '' }) {
+// 👇 This is what index.js is expecting
+export async function appendToSheet(row) {
   const client = await auth.getClient();
   const sheets = google.sheets({ version: 'v4', auth: client });
 
-  // Convert to Israel time (UTC+3) and format to "HH:mm DD-MM-YY"
-  const israelTime = new Date(new Date(timestamp).toLocaleString('en-US', { timeZone: 'Asia/Jerusalem' }));
-  const formattedDate = israelTime.toLocaleTimeString('he-IL', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }) + ' ' + israelTime.toLocaleDateString('he-IL');
-
   const values = [[
-    formattedDate,            // תאריך ושעה
-    message,                  // תוכן הפנייה
-    chatName,                 // שם הפונה
-    from,                     // טלפון
-    imageUrl                  // קישור לתמונה
+    row['תאריך ושעה'] || '',
+    row['תוכן הפנייה'] || '',
+    row['שם הפונה'] || '',
+    row['טלפון'] || '',
+    row['קישור לתמונה'] || '',
+    row['קטגוריה'] || '',
+    row['רמת דחיפות'] || '',
+    row['סוג הפנייה'] || '',
+    row['מחלקה אחראית'] || '',
+    row['source'] || '',
   ]];
 
   await sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
-    range: 'A:E',
+    range: 'A:J',
     valueInputOption: 'RAW',
-    resource: { values }
+    resource: { values },
   });
 
-  console.log('✅ הפנייה נרשמה בהצלחה לטבלת Google Sheets.');
+  console.log(`📥 Sheet updated with entry from ${row['טלפון']}`);
 }
