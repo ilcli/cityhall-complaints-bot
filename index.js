@@ -1,42 +1,64 @@
 import express from 'express';
-import { analyzeComplaint } from './analyzeMessageWithAI.js';
-import { logComplaintToSheet } from './googleSheets.js';
+import bodyParser from 'body-parser';
+import { analyzeComplaint } from './analyzeComplaint.js';
+import { appendToSheet } from './googleSheets.js';
+import { DateTime } from 'luxon';
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 
-app.use(express.json());
-
-app.get('/', (req, res) => {
-  res.send('City Hall Complaints Bot is running.');
-});
+app.use(bodyParser.json({ limit: '2mb' }));
 
 app.post('/webhook', async (req, res) => {
   try {
-    const payload = req.body.payload?.payload;
-    if (!payload?.text || !payload?.sender?.phone) {
-      console.error('❌ Invalid webhook payload');
-      return res.status(400).send('Invalid payload');
+    const { payload } = req.body;
+
+    if (!payload || !payload.message || !payload.sender) {
+      console.warn('Invalid payload received:', JSON.stringify(req.body));
+      return res.status(400).send('Bad Request: Missing fields');
     }
 
-    const message = payload.text;
-    const timestamp = new Date().toISOString();
-    const imageUrl = ''; // Will be populated later if image-handling logic is added
+    const messageText = payload.message.text || '';
+    const senderPhone = payload.sender;
+    const timestampMs = parseInt(payload.timestamp); // Unix ms
 
-    console.log('📩 New incoming message:', message);
+    const timestamp = DateTime.fromMillis(timestampMs)
+      .setZone('Asia/Jerusalem')
+      .toFormat('HH:mm dd-MM-yy');
 
-    const structured = await analyzeComplaint({ message, timestamp, imageUrl });
-    console.log('🧠 Parsed structure:', structured);
+    const analysis = await analyzeComplaint({
+      message: messageText,
+      timestamp,
+      imageUrl: null, // Add logic if you later support media
+    });
 
-    await logComplaintToSheet(structured);
+    const row = {
+      'שם הפונה': analysis['שם הפונה'] || '',
+      'קטגוריה': analysis['קטגוריה'] || '',
+      'רמת דחיפות': analysis['רמת דחיפות'] || '',
+      'תוכן הפנייה': analysis['תוכן הפנייה'] || messageText,
+      'תאריך ושעה': timestamp,
+      'טלפון': senderPhone,
+      'קישור לתמונה': analysis['קישור לתמונה'] || '',
+      'סוג הפנייה': analysis['סוג הפנייה'] || '',
+      'מחלקה אחראית': analysis['מחלקה אחראית'] || '',
+      'source': 'gupshup',
+    };
 
-    res.send('✅ Complaint logged successfully');
-  } catch (error) {
-    console.error('❌ Error processing webhook:', error);
-    res.status(500).send('Internal Server Error');
+    await appendToSheet(row);
+    console.log(`✅ Complaint from ${senderPhone} logged successfully.`);
+
+    return res.status(200).send('OK');
+  } catch (err) {
+    console.error('❌ Error in /webhook handler:', err);
+    return res.status(500).send('Internal Server Error');
   }
 });
 
+app.get('/', (req, res) => {
+  res.send('City Hall Complaint Bot is running.');
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}/webhook`);
+  console.log(`🚀 Server live on port ${PORT}`);
 });
