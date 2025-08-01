@@ -1,3 +1,6 @@
+
+
+
 import express from 'express';
 import bodyParser from 'body-parser';
 import { analyzeComplaint } from './analyzeComplaint.js';
@@ -13,14 +16,19 @@ app.post('/webhook', async (req, res) => {
   try {
     const { payload } = req.body;
 
-    if (!payload || !payload.message || !payload.sender) {
-      console.warn('Invalid payload received:', JSON.stringify(req.body));
-      return res.status(400).send('Bad Request: Missing fields');
-    }
+if (
+  !payload?.payload?.payload ||
+  !payload?.payload?.sender?.phone ||
+  !payload?.payload?.timestamp
+) {
+  console.warn('Invalid payload structure:', JSON.stringify(req.body));
+  return res.status(400).send('Invalid payload structure');
+}
 
-    const messageText = payload.message.text || '';
-    const senderPhone = payload.sender;
-    const timestampMs = parseInt(payload.timestamp); // Unix ms
+const messageText = payload.payload.payload;
+const senderPhone = payload.payload.sender.phone;
+const timestampMs = parseInt(payload.payload.timestamp);
+ // Unix ms
 
     const timestamp = DateTime.fromMillis(timestampMs)
       .setZone('Asia/Jerusalem')
