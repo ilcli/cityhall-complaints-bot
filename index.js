@@ -6,9 +6,8 @@ import { DateTime } from 'luxon';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet } from './googleSheets.js';
 
-// Store recent messages for pairing with images
+// Track recent messages to pair with incoming image-only messages
 const recentMessages = new Map();
-
 function isWithin60Seconds(oldTs, newTs) {
   return Math.abs(newTs - oldTs) <= 60000;
 }
@@ -22,35 +21,47 @@ app.use(bodyParser.json({ limit: '2mb' }));
 
 app.post('/webhook', async (req, res) => {
   try {
-    const { payload } = req.body;
+    const { type: webhookType, payload } = req.body;
 
-    const inner = payload?.payload;
-    const type = payload?.type;
-    const messageType = inner?.type;
-    const content = inner?.payload;
-    const sender = inner?.payload?.sender?.phone || inner?.sender?.phone;
-    const timestampMsRaw = inner?.payload?.timestamp || inner?.timestamp;
+    if (webhookType !== 'message-event') {
+      console.log('⚠️ Ignored non-message event:', webhookType);
+      return res.status(200).send('Ignored');
+    }
+
+    const content = payload?.payload;
+    const sender = content?.sender?.phone;
+    const timestampMsRaw = content?.timestamp;
     const timestampMs = parseInt(timestampMsRaw);
 
+    // Validate required fields
     if (!sender) {
-      console.warn('Missing sender');
+      console.warn('❌ Missing sender');
       return res.status(400).send('Missing sender');
     }
 
     if (!timestampMs || isNaN(timestampMs)) {
-      console.warn('Missing or invalid timestamp');
+      console.warn('❌ Invalid timestamp');
       return res.status(400).send('Invalid timestamp');
-    }
-
-    if (!content && messageType !== 'image') {
-      console.warn('Invalid payload structure');
-      return res.status(400).send('Invalid content');
     }
 
     const timestamp = DateTime.fromMillis(timestampMs)
       .setZone('Asia/Jerusalem')
       .toFormat('HH:mm dd-MM-yy');
 
+    // Infer message type based on content structure
+    let messageType = '';
+    if (content?.type) {
+      messageType = content.type;
+    } else if (content?.url || content?.mediaUrl) {
+      messageType = 'image';
+    } else if (typeof content?.payload === 'string') {
+      messageType = 'text';
+    } else {
+      console.warn('❌ Unsupported or unknown message type');
+      return res.status(400).send('Unsupported message type');
+    }
+
+    // Extract message text or image
     let messageText = '';
     let imageUrl = null;
 
@@ -60,7 +71,7 @@ app.post('/webhook', async (req, res) => {
 
     } else if (messageType === 'image') {
       const caption = content.payload || ''; // optional
-      imageUrl = content.url || content.mediaUrl || ''; // support multiple formats
+      imageUrl = content.url || content.mediaUrl || '';
 
       if (caption) {
         messageText = caption;
@@ -74,11 +85,13 @@ app.post('/webhook', async (req, res) => {
       } else {
         messageText = '(תמונה ללא טקסט, לא ניתן לקשר לפנייה)';
       }
+
     } else {
-      console.warn('Unsupported message type:', messageType);
+      console.warn('❌ Unsupported message type:', messageType);
       return res.status(400).send('Unsupported message type');
     }
 
+    // AI analysis
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
 
     const row = {
@@ -104,7 +117,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Periodically clear old messages
+// Clean up expired recent messages
 setInterval(() => {
   const now = Date.now();
   for (const [phone, data] of recentMessages) {
