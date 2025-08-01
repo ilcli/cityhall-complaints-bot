@@ -15,9 +15,7 @@ curl -X POST "$WEBHOOK_URL" \
       },
       "sender": {
         "phone": "972501234567",
-        "name": "Test User",
-        "country_code": "972",
-        "dial_code": "501234567"
+        "name": "Test User"
       },
       "timestamp": "'"$(date +%s000)"'"
     }

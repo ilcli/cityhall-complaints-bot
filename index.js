@@ -66,18 +66,26 @@ app.post('/webhook', async (req, res) => {
     } else if (messageType === 'image') {
       const caption = content.payload?.caption || '';
       imageUrl = content.payload?.url || '';
+      
+      console.log(`📸 Processing image from ${sender}:`);
+      console.log(`   Caption: "${caption}"`);
+      console.log(`   Image URL: ${imageUrl}`);
 
       if (caption) {
         messageText = caption;
+        console.log(`   Using caption as message text`);
       } else if (recentMessages.has(sender)) {
         const recent = recentMessages.get(sender);
         if (isWithin60Seconds(recent.timestamp, timestampMs)) {
           messageText = recent.message;
+          console.log(`   Paired with recent message: "${messageText}"`);
         } else {
           messageText = '(תמונה ללא טקסט, לא ניתן לקשר לפנייה)';
+          console.log(`   No recent message within 60s, using fallback`);
         }
       } else {
         messageText = '(תמונה ללא טקסט, לא ניתן לקשר לפנייה)';
+        console.log(`   No recent messages found, using fallback`);
       }
 
     } else {
@@ -86,7 +94,9 @@ app.post('/webhook', async (req, res) => {
     }
 
     // AI analysis
+    console.log(`🤖 Analyzing complaint with message: "${messageText}" and imageUrl: "${imageUrl}"`);
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
+    console.log(`🤖 AI analysis result:`, analysis);
 
     const row = {
       'שם הפונה': analysis['שם הפונה'] || '',
@@ -101,6 +111,7 @@ app.post('/webhook', async (req, res) => {
       'source': 'gupshup',
     };
 
+    console.log(`📝 Row data to be sent to sheet:`, row);
     await appendToSheet(row);
     console.log(`✅ Complaint from ${sender} logged with type: ${messageType}`);
     return res.status(200).send('OK');

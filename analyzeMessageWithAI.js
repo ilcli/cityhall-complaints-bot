@@ -18,7 +18,6 @@ export async function analyzeComplaint({ message, timestamp, imageUrl }) {
 - "מחלקה אחראית": מחלקה רלוונטית בעירייה (כמו תברואה, חשמל, גינון וכו')
 
 הודעה: """${message}"""
-טלפון: ${message?.phone || 'לא צוין'}
 תמונה: ${imageUrl || 'אין'}
 תאריך ושעה: ${timestamp}
   `;
@@ -56,7 +55,6 @@ export async function analyzeComplaint({ message, timestamp, imageUrl }) {
     return {
       'תוכן הפנייה': message,
       'תאריך ושעה': timestamp,
-      'טלפון': message?.phone || '',
       'קישור לתמונה': imageUrl || '',
     };
   }
