@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Replace with your actual Railway webhook URL
-WEBHOOK_URL="https://cityhall-complaints-bot-production.up.railway.app//webhook"
+WEBHOOK_URL="https://cityhall-complaints-bot-production.up.railway.app/webhook"
 
 # Optional: Add token if you secure your webhook with a header
 TOKEN="your-secret-token"
