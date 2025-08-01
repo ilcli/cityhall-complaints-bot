@@ -1,3 +1,17 @@
+import express from 'express';
+import bodyParser from 'body-parser';
+import { analyzeComplaint } from './analyzeMessageWithAI.js';
+import { appendToSheet } from './googleSheets.js';
+import { DateTime } from 'luxon';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+app.use(bodyParser.json({ limit: '2mb' }));
+
 app.post('/webhook', async (req, res) => {
   try {
     const { payload } = req.body;
@@ -13,7 +27,7 @@ app.post('/webhook', async (req, res) => {
 
     const messageText = payload.message.text;
     const senderPhone = payload.sender;
-    const timestampMs = parseInt(payload.timestamp); // Unix ms
+    const timestampMs = parseInt(payload.timestamp);
 
     const timestamp = DateTime.fromMillis(timestampMs)
       .setZone('Asia/Jerusalem')
@@ -22,7 +36,7 @@ app.post('/webhook', async (req, res) => {
     const analysis = await analyzeComplaint({
       message: messageText,
       timestamp,
-      imageUrl: null, // optional, for later
+      imageUrl: null,
     });
 
     const row = {
@@ -44,6 +58,4 @@ app.post('/webhook', async (req, res) => {
     return res.status(200).send('OK');
   } catch (err) {
     console.error('❌ Error in /webhook handler:', err);
-    return res.status(500).send('Internal Server Error');
-  }
-});
+    return res.status(500).s
