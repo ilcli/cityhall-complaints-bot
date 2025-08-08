@@ -168,6 +168,16 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Add GET endpoint for webhook verification
+app.get('/webhook', (req, res) => {
+  res.json({
+    status: 'webhook endpoint active',
+    method: 'POST required for webhook processing',
+    url: req.url,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Add error handler middleware (must be last)
 app.use(errorHandler);
 
