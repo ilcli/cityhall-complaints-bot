@@ -63,29 +63,15 @@ app.post('/webhook', async (req, res) => {
   try {
     console.log('📨 Webhook received:', JSON.stringify(req.body, null, 2));
     
-    // Extract data from Gupshup webhook structure
-    const { type: webhookType, payload: mainPayload } = req.body;
-
-    // Only process message events
-    if (webhookType !== 'message-event') {
-      console.log('⚠️ Ignored non-message event:', webhookType);
-      return res.status(200).send('Ignored');
-    }
-
-    // Handle failed messages
-    if (mainPayload?.type === 'failed') {
-      console.log('❌ Message failed:', mainPayload.payload);
-      return res.status(200).json({ status: 'failed', reason: mainPayload.payload?.reason });
-    }
-
-    // Extract message data from Gupshup structure
-    const messageType = mainPayload?.type; // 'text', 'image', etc.
-    const sender = mainPayload?.source || '';
-    const timestampMs = mainPayload?.timestamp || Date.now();
-    const messagePayload = mainPayload?.payload || {};
+    // Auto-detect webhook source and parse accordingly
+    const { messageData, source } = parseWebhookPayload(req.body);
     
-    // Generate unique message ID
-    const messageId = mainPayload?.id || generateMessageId(mainPayload);
+    if (!messageData) {
+      console.log('⚠️ No valid message data found in webhook');
+      return res.status(200).send('No message data');
+    }
+
+    const { messageType, sender, timestampMs, messagePayload, messageId } = messageData;
     
     // Check for duplicates
     if (messageStore.isProcessed(messageId)) {
@@ -110,7 +96,7 @@ app.post('/webhook', async (req, res) => {
 
     } else if (messageType === 'image') {
       const caption = messagePayload.caption || '';
-      imageUrl = messagePayload.url || '';
+      imageUrl = messagePayload.url || messagePayload.link || '';
       
       console.log(`📸 Processing image from ${sender}:`);
       console.log(`   Caption: "${caption}"`);
@@ -147,12 +133,12 @@ app.post('/webhook', async (req, res) => {
       'קישור לתמונה': imageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
-      'source': 'gupshup',
+      'source': source,
     };
 
     console.log(`📝 Row data to be sent to sheet:`, row);
     await appendToSheet(row);
-    console.log(`✅ Complaint from ${sender} logged with type: ${messageType}`);
+    console.log(`✅ Complaint from ${sender} logged with type: ${messageType} (source: ${source})`);
     return res.status(200).json({ status: 'success', messageId });
 
   } catch (error) {
@@ -161,8 +147,106 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Add GET endpoint for webhook verification
+// Helper function to parse webhook payload from different sources
+function parseWebhookPayload(body) {
+  // Check if this is Meta WhatsApp Business API format
+  if (body.entry && Array.isArray(body.entry) && body.entry[0]?.changes) {
+    const entry = body.entry[0];
+    const change = entry.changes[0];
+    
+    if (change?.value?.messages && Array.isArray(change.value.messages)) {
+      const message = change.value.messages[0];
+      const messageType = message.type;
+      const sender = message.from;
+      const timestampMs = parseInt(message.timestamp) * 1000; // Convert from seconds to milliseconds
+      const messageId = message.id;
+      
+      let messagePayload = {};
+      
+      if (messageType === 'text') {
+        messagePayload.text = message.text?.body || '';
+      } else if (messageType === 'image') {
+        messagePayload.caption = message.image?.caption || '';
+        messagePayload.url = message.image?.link || '';
+        messagePayload.id = message.image?.id || '';
+      }
+      
+      console.log(`📱 Meta WhatsApp message detected: ${messageType} from ${sender}`);
+      
+      return {
+        messageData: {
+          messageType,
+          sender,
+          timestampMs,
+          messagePayload,
+          messageId
+        },
+        source: 'whatsapp'
+      };
+    }
+  }
+  
+  // Check if this is Gupshup format
+  if (body.type === 'message-event' && body.payload) {
+    const mainPayload = body.payload;
+    
+    // Handle failed messages
+    if (mainPayload.type === 'failed') {
+      console.log('❌ Gupshup message failed:', mainPayload.payload);
+      return { messageData: null, source: 'gupshup' };
+    }
+    
+    const messageType = mainPayload.type;
+    const sender = mainPayload.source || '';
+    const timestampMs = mainPayload.timestamp || Date.now();
+    const messagePayload = mainPayload.payload || {};
+    const messageId = mainPayload.id || generateMessageId(mainPayload);
+    
+    console.log(`📱 Gupshup message detected: ${messageType} from ${sender}`);
+    
+    return {
+      messageData: {
+        messageType,
+        sender,
+        timestampMs,
+        messagePayload,
+        messageId
+      },
+      source: 'gupshup'
+    };
+  }
+  
+  console.log('⚠️ Unknown webhook format, ignoring');
+  return { messageData: null, source: 'unknown' };
+}
+
+// GET endpoint for Meta WhatsApp webhook verification
 app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  
+  console.log('🔍 Webhook verification request:', { mode, token, challenge });
+  
+  // Check if this is Meta's webhook verification
+  if (mode === 'subscribe') {
+    const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
+    
+    if (!verifyToken) {
+      console.error('❌ META_WEBHOOK_VERIFY_TOKEN not configured');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
+    if (token === verifyToken) {
+      console.log('✅ Webhook verification successful');
+      return res.status(200).send(challenge);
+    } else {
+      console.warn('❌ Invalid verify token');
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+  
+  // Default response for non-verification requests
   res.json({
     status: 'webhook endpoint active',
     method: 'POST required for webhook processing',
