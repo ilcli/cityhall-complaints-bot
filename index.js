@@ -30,12 +30,16 @@ function validateEnvironment() {
   }
 }
 
-// Validate environment on startup
+// Validate environment on startup (non-fatal in production)
 try {
   validateEnvironment();
 } catch (error) {
   console.error('❌ Configuration error:', error.message);
-  process.exit(1);
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  } else {
+    console.warn('⚠️ Starting with incomplete configuration - some features may not work');
+  }
 }
 
 const app = express();
