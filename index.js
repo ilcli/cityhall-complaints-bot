@@ -61,10 +61,36 @@ app.use('/webhook', rateLimitMiddleware);
 
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('📨 Webhook received:', JSON.stringify(req.body, null, 2));
+    // Log the raw body first in case JSON parsing fails
+    console.log('📨 Raw webhook body type:', typeof req.body);
+    console.log('📨 Raw webhook body length:', JSON.stringify(req.body).length);
+    
+    let parsedBody;
+    try {
+      // Safely log the parsed JSON
+      parsedBody = req.body;
+      console.log('📨 Webhook received (parsed):', JSON.stringify(parsedBody, null, 2));
+    } catch (jsonError) {
+      console.error('❌ JSON parsing failed:', jsonError.message);
+      console.log('📨 Raw webhook body as string:', JSON.stringify(req.body));
+      console.log('📨 Raw webhook body keys:', Object.keys(req.body || {}));
+      
+      // Try to extract whatever we can from the malformed JSON
+      if (typeof req.body === 'string') {
+        console.log('📨 Body is string, attempting to parse...');
+        try {
+          parsedBody = JSON.parse(req.body);
+        } catch (stringParseError) {
+          console.error('❌ Failed to parse string body:', stringParseError.message);
+          return res.status(400).json({ error: 'Malformed JSON payload' });
+        }
+      } else {
+        parsedBody = req.body;
+      }
+    }
     
     // Auto-detect webhook source and parse accordingly
-    const { messageData, source } = parseWebhookPayload(req.body);
+    const { messageData, source } = parseWebhookPayload(parsedBody);
     
     if (!messageData) {
       console.log('⚠️ No valid message data found in webhook');
@@ -149,41 +175,73 @@ app.post('/webhook', async (req, res) => {
 
 // Helper function to parse webhook payload from different sources
 function parseWebhookPayload(body) {
-  // Check if this is Meta WhatsApp Business API format
-  if (body.entry && Array.isArray(body.entry) && body.entry[0]?.changes) {
-    const entry = body.entry[0];
-    const change = entry.changes[0];
-    
-    if (change?.value?.messages && Array.isArray(change.value.messages)) {
-      const message = change.value.messages[0];
-      const messageType = message.type;
-      const sender = message.from;
-      const timestampMs = parseInt(message.timestamp) * 1000; // Convert from seconds to milliseconds
-      const messageId = message.id;
+  try {
+    // Check if this is Meta WhatsApp Business API format
+    if (body.entry && Array.isArray(body.entry) && body.entry[0]?.changes) {
+      const entry = body.entry[0];
       
-      let messagePayload = {};
-      
-      if (messageType === 'text') {
-        messagePayload.text = message.text?.body || '';
-      } else if (messageType === 'image') {
-        messagePayload.caption = message.image?.caption || '';
-        messagePayload.url = message.image?.link || '';
-        messagePayload.id = message.image?.id || '';
+      if (!Array.isArray(entry.changes) || entry.changes.length === 0) {
+        console.log('⚠️ Meta webhook: no changes array found');
+        return { messageData: null, source: 'whatsapp' };
       }
       
-      console.log(`📱 Meta WhatsApp message detected: ${messageType} from ${sender}`);
+      const change = entry.changes[0];
       
-      return {
-        messageData: {
-          messageType,
-          sender,
-          timestampMs,
-          messagePayload,
-          messageId
-        },
-        source: 'whatsapp'
-      };
+      // Check for errors in the webhook
+      if (change?.value?.errors) {
+        console.log('❌ Meta webhook contains errors:', JSON.stringify(change.value.errors, null, 2));
+        return { messageData: null, source: 'whatsapp' };
+      }
+      
+      // Check for status updates (not messages)
+      if (change?.value?.statuses) {
+        console.log('📊 Meta webhook status update:', JSON.stringify(change.value.statuses, null, 2));
+        return { messageData: null, source: 'whatsapp' };
+      }
+      
+      if (change?.value?.messages && Array.isArray(change.value.messages)) {
+        const message = change.value.messages[0];
+        
+        if (!message) {
+          console.log('⚠️ Meta webhook: empty messages array');
+          return { messageData: null, source: 'whatsapp' };
+        }
+        
+        const messageType = message.type;
+        const sender = message.from;
+        const timestampMs = parseInt(message.timestamp) * 1000; // Convert from seconds to milliseconds
+        const messageId = message.id;
+        
+        let messagePayload = {};
+        
+        if (messageType === 'text') {
+          messagePayload.text = message.text?.body || '';
+        } else if (messageType === 'image') {
+          messagePayload.caption = message.image?.caption || '';
+          messagePayload.url = message.image?.link || '';
+          messagePayload.id = message.image?.id || '';
+        } else {
+          console.log(`⚠️ Unsupported Meta message type: ${messageType}`);
+          return { messageData: null, source: 'whatsapp' };
+        }
+        
+        console.log(`📱 Meta WhatsApp message detected: ${messageType} from ${sender}`);
+        
+        return {
+          messageData: {
+            messageType,
+            sender,
+            timestampMs,
+            messagePayload,
+            messageId
+          },
+          source: 'whatsapp'
+        };
+      }
     }
+  } catch (metaError) {
+    console.error('❌ Error parsing Meta webhook:', metaError.message);
+    console.log('📨 Problematic Meta payload:', JSON.stringify(body, null, 2));
   }
   
   // Check if this is Gupshup format
