@@ -66,6 +66,9 @@ app.post('/webhook', asyncHandler(async (req, res) => {
       throw new ValidationError('Invalid webhook payload', validation.errors);
     }
     
+    // Debug: Log the entire request body to understand Gupshup's structure
+    console.log('🔍 Full webhook payload:', JSON.stringify(req.body, null, 2));
+    
     const { type: webhookType, payload } = req.body;
 
     if (webhookType !== 'message' && webhookType !== 'message-event') {
@@ -74,6 +77,7 @@ app.post('/webhook', asyncHandler(async (req, res) => {
     }
 
     const content = payload;
+    console.log('🔍 Extracted content:', JSON.stringify(content, null, 2));
     const sender = content?.sender?.phone;
     const timestampMsRaw = content?.timestamp;
     const timestampMs = parseInt(timestampMsRaw);
@@ -96,6 +100,7 @@ app.post('/webhook', asyncHandler(async (req, res) => {
 
     // Get message type from content
     const messageType = content?.type;
+    console.log('🔍 Message type:', messageType);
 
     // Extract message text or image
     let messageText = '';
