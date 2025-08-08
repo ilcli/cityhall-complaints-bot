@@ -143,19 +143,27 @@ app.post('/webhook', async (req, res) => {
       }
     }
 
+    // Extract phone numbers and names from message text
+    const extractedInfo = extractContactInfo(messageText);
+    console.log(`📋 Extracted contact info:`, extractedInfo);
+
     // AI analysis
     console.log(`🤖 Analyzing complaint with message: "${messageText}" and imageUrl: "${imageUrl}"`);
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
     console.log(`🤖 AI analysis result:`, analysis);
 
+    // Prioritize extracted info over sender data and AI analysis
+    const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
+    const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
+
     // Prepare row for Google Sheets
     const row = {
-      'שם הפונה': sanitizeForSheets(analysis['שם הפונה'] || ''),
+      'שם הפונה': sanitizeForSheets(finalName),
       'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
       'רמת דחיפות': sanitizeForSheets(analysis['רמת דחיפות'] || ''),
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
-      'טלפון': formatIsraeliPhoneNumber(sender),
+      'טלפון': finalPhone,
       'קישור לתמונה': imageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
@@ -276,6 +284,67 @@ function parseWebhookPayload(body) {
   
   console.log('⚠️ Unknown webhook format, ignoring');
   return { messageData: null, source: 'unknown' };
+}
+
+// Helper function to extract contact info from message text
+function extractContactInfo(messageText) {
+  if (!messageText || typeof messageText !== 'string') {
+    return { name: null, phone: null };
+  }
+
+  const text = messageText.toLowerCase();
+  
+  // Extract phone numbers - prioritize those found in text
+  const phonePatterns = [
+    /(?:טלפון|טל|נייד|פלאפון|מספר|קשר)[\s:]*(\d{2,3}[-\s]?\d{7,8})/gi,  // Hebrew phone keywords
+    /(?:phone|mobile|tel|call|contact)[\s:]*(\d{2,3}[-\s]?\d{7,8})/gi,      // English phone keywords
+    /(\b05\d[-\s]?\d{7})/g,     // Israeli mobile: 05X-XXXXXXX
+    /(\b0\d[-\s]?\d{7,8})/g,    // Israeli landline: 0X-XXXXXXXX
+    /(\b972\d{8,9})/g,          // International Israeli: 972XXXXXXXXX
+    /(\d{3}[-\s]?\d{3}[-\s]?\d{4})/g  // General phone pattern: XXX-XXX-XXXX
+  ];
+
+  let extractedPhone = null;
+  for (const pattern of phonePatterns) {
+    const matches = messageText.match(pattern);
+    if (matches && matches[0]) {
+      extractedPhone = formatIsraeliPhoneNumber(matches[0].replace(/\D/g, ''));
+      break;
+    }
+  }
+
+  // Extract names - look for name patterns
+  const namePatterns = [
+    /(?:שמי|השם שלי|קוראים לי|אני)[\s:]*([\u0590-\u05FF\s]+?)(?:\s|,|\.|\n|$)/gi,  // Hebrew name patterns
+    /(?:שם|מטעם|בשם)[\s:]*([\u0590-\u05FF\s]+?)(?:\s|,|\.|\n|$)/gi,                // Hebrew name contexts
+    /(?:my name is|i am|name|from)[\s:]*([\w\s]+?)(?:\s|,|\.|\n|$)/gi,              // English name patterns
+    /^([\u0590-\u05FF]{2,}\s[\u0590-\u05FF]{2,})/gm,                              // Hebrew first/last name at start
+    /^([A-Z][a-z]+\s[A-Z][a-z]+)/gm                                               // English first/last name at start
+  ];
+
+  let extractedName = null;
+  for (const pattern of namePatterns) {
+    const matches = messageText.match(pattern);
+    if (matches && matches[0]) {
+      // Clean up the extracted name
+      extractedName = matches[0]
+        .replace(/(שמי|השם שלי|קוראים לי|אני|שם|מטעם|בשם|my name is|i am|name|from)[\s:]*/gi, '')
+        .replace(/[,\.!?]/g, '')
+        .trim();
+      
+      // Validate name (at least 2 characters, not just numbers)
+      if (extractedName.length >= 2 && !/^\d+$/.test(extractedName)) {
+        break;
+      } else {
+        extractedName = null;
+      }
+    }
+  }
+
+  return {
+    name: extractedName,
+    phone: extractedPhone
+  };
 }
 
 // Helper function to format Israeli phone numbers (972 -> 0)
