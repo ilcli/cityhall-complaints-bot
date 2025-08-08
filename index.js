@@ -155,7 +155,7 @@ app.post('/webhook', async (req, res) => {
       'רמת דחיפות': sanitizeForSheets(analysis['רמת דחיפות'] || ''),
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
-      'טלפון': sender,
+      'טלפון': formatIsraeliPhoneNumber(sender),
       'קישור לתמונה': imageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
@@ -276,6 +276,27 @@ function parseWebhookPayload(body) {
   
   console.log('⚠️ Unknown webhook format, ignoring');
   return { messageData: null, source: 'unknown' };
+}
+
+// Helper function to format Israeli phone numbers (972 -> 0)
+function formatIsraeliPhoneNumber(phoneNumber) {
+  if (!phoneNumber || typeof phoneNumber !== 'string') {
+    return phoneNumber || '';
+  }
+  
+  // Remove any non-digit characters first
+  const digitsOnly = phoneNumber.replace(/\D/g, '');
+  
+  // Check if it starts with 972 (Israel country code)
+  if (digitsOnly.startsWith('972')) {
+    // Replace 972 with 0
+    const formatted = '0' + digitsOnly.substring(3);
+    console.log(`📞 Formatted phone: ${phoneNumber} -> ${formatted}`);
+    return formatted;
+  }
+  
+  // Return original if not Israeli format
+  return phoneNumber;
 }
 
 // GET endpoint for Meta WhatsApp webhook verification
