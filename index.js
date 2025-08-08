@@ -301,6 +301,7 @@ function extractContactInfo(messageText) {
     /(\b05\d[-\s]?\d{7})/g,     // Israeli mobile: 05X-XXXXXXX
     /(\b0\d[-\s]?\d{7,8})/g,    // Israeli landline: 0X-XXXXXXXX
     /(\b972\d{8,9})/g,          // International Israeli: 972XXXXXXXXX
+    /\n(\d{3}[-\s]?\d{7})\s*$/gm,  // Phone number on its own line at end
     /(\d{3}[-\s]?\d{3}[-\s]?\d{4})/g  // General phone pattern: XXX-XXX-XXXX
   ];
 
@@ -318,8 +319,10 @@ function extractContactInfo(messageText) {
     /(?:שמי|השם שלי|קוראים לי|אני)[\s:]*([\u0590-\u05FF\s]+?)(?:\s|,|\.|\n|$)/gi,  // Hebrew name patterns
     /(?:שם|מטעם|בשם)[\s:]*([\u0590-\u05FF\s]+?)(?:\s|,|\.|\n|$)/gi,                // Hebrew name contexts
     /(?:my name is|i am|name|from)[\s:]*([\w\s]+?)(?:\s|,|\.|\n|$)/gi,              // English name patterns
+    /([\u0590-\u05FF]{2,}\s[\u0590-\u05FF]{2,})(?:\s*-\s*רחוב|\s*,|\s*\n)/gm,      // Hebrew name before address/comma/newline
     /^([\u0590-\u05FF]{2,}\s[\u0590-\u05FF]{2,})/gm,                              // Hebrew first/last name at start
-    /^([A-Z][a-z]+\s[A-Z][a-z]+)/gm                                               // English first/last name at start
+    /^([A-Z][a-z]+\s[A-Z][a-z]+)/gm,                                               // English first/last name at start
+    /\n([\u0590-\u05FF]{2,}\s[\u0590-\u05FF]{2,})(?:\s*-)/gm                       // Hebrew name after newline before dash
   ];
 
   let extractedName = null;
