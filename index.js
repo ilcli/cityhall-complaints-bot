@@ -64,7 +64,7 @@ app.post('/webhook', asyncHandler(async (req, res) => {
     
     const { type: webhookType, payload } = req.body;
 
-    if (webhookType !== 'message') {
+    if (webhookType !== 'message' && webhookType !== 'message-event') {
       console.log('⚠️ Ignored non-message event:', webhookType);
       return res.status(200).send('Ignored');
     }
