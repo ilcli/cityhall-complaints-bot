@@ -59,15 +59,19 @@ if (process.env.WEBHOOK_SECRET) {
 // Apply rate limiting
 app.use('/webhook', rateLimitMiddleware);
 
-app.post('/webhook', asyncHandler(async (req, res) => {
+app.post('/webhook', async (req, res) => {
+  try {
+    console.log('📨 Webhook received:', JSON.stringify(req.body, null, 2));
+    
+    // Simple response for now
+    return res.status(200).json({ status: 'received' });
+    
+    /* TEMPORARILY DISABLED PROCESSING TO DEBUG STRUCTURE
     // Validate webhook payload structure
     const validation = validateWebhookPayload(req.body);
     if (!validation.valid) {
       throw new ValidationError('Invalid webhook payload', validation.errors);
     }
-    
-    // Debug: Log the entire request body to understand Gupshup's structure
-    console.log('🔍 Full webhook payload:', JSON.stringify(req.body, null, 2));
     
     const { type: webhookType, payload } = req.body;
 
@@ -157,7 +161,12 @@ app.post('/webhook', asyncHandler(async (req, res) => {
     await appendToSheet(row);
     console.log(`✅ Complaint from ${sender} logged with type: ${messageType}`);
     return res.status(200).json({ status: 'success', messageId });
-}));
+    */
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Add error handler middleware (must be last)
 app.use(errorHandler);
