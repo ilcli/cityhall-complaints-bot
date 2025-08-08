@@ -63,60 +63,54 @@ app.post('/webhook', async (req, res) => {
   try {
     console.log('📨 Webhook received:', JSON.stringify(req.body, null, 2));
     
-    // Simple response for now
-    return res.status(200).json({ status: 'received' });
-    
-    /* TEMPORARILY DISABLED PROCESSING TO DEBUG STRUCTURE
-    // Validate webhook payload structure
-    const validation = validateWebhookPayload(req.body);
-    if (!validation.valid) {
-      throw new ValidationError('Invalid webhook payload', validation.errors);
-    }
-    
-    const { type: webhookType, payload } = req.body;
+    // Extract data from Gupshup webhook structure
+    const { type: webhookType, payload: mainPayload } = req.body;
 
-    if (webhookType !== 'message' && webhookType !== 'message-event') {
+    // Only process message events
+    if (webhookType !== 'message-event') {
       console.log('⚠️ Ignored non-message event:', webhookType);
       return res.status(200).send('Ignored');
     }
 
-    const content = payload;
-    console.log('🔍 Extracted content:', JSON.stringify(content, null, 2));
-    const sender = content?.sender?.phone;
-    const timestampMsRaw = content?.timestamp;
-    const timestampMs = parseInt(timestampMsRaw);
+    // Handle failed messages
+    if (mainPayload?.type === 'failed') {
+      console.log('❌ Message failed:', mainPayload.payload);
+      return res.status(200).json({ status: 'failed', reason: mainPayload.payload?.reason });
+    }
+
+    // Extract message data from Gupshup structure
+    const messageType = mainPayload?.type; // 'text', 'image', etc.
+    const sender = mainPayload?.source || '';
+    const timestampMs = mainPayload?.timestamp || Date.now();
+    const messagePayload = mainPayload?.payload || {};
     
-    // Generate unique message ID for deduplication
-    const messageId = generateMessageId(content);
+    // Generate unique message ID
+    const messageId = mainPayload?.id || generateMessageId(mainPayload);
     
-    // Check for duplicate messages
+    // Check for duplicates
     if (messageStore.isProcessed(messageId)) {
       console.log(`⚠️ Duplicate message ignored: ${messageId}`);
       return res.status(200).send('Duplicate');
     }
-    
-    // Mark as processed immediately to prevent race conditions
     messageStore.markProcessed(messageId);
 
+    // Format timestamp
     const timestamp = DateTime.fromMillis(timestampMs)
       .setZone('Asia/Jerusalem')
       .toFormat('HH:mm dd-MM-yy');
 
-    // Get message type from content
-    const messageType = content?.type;
-    console.log('🔍 Message type:', messageType);
-
-    // Extract message text or image
+    // Extract message content based on type
     let messageText = '';
     let imageUrl = null;
 
     if (messageType === 'text') {
-      messageText = sanitizeText(content.payload?.text || content.payload || '');
+      messageText = sanitizeText(messagePayload.text || messagePayload || '');
       messageStore.storeMessage(sender, messageText, timestampMs);
+      console.log(`📝 Text message from ${sender}: "${messageText}"`);
 
     } else if (messageType === 'image') {
-      const caption = content.payload?.caption || '';
-      imageUrl = content.payload?.url || '';
+      const caption = messagePayload.caption || '';
+      imageUrl = messagePayload.url || '';
       
       console.log(`📸 Processing image from ${sender}:`);
       console.log(`   Caption: "${caption}"`);
@@ -135,7 +129,6 @@ app.post('/webhook', async (req, res) => {
           console.log(`   No recent messages found, using fallback`);
         }
       }
-
     }
 
     // AI analysis
@@ -143,7 +136,7 @@ app.post('/webhook', async (req, res) => {
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
     console.log(`🤖 AI analysis result:`, analysis);
 
-    // Sanitize all fields for Google Sheets
+    // Prepare row for Google Sheets
     const row = {
       'שם הפונה': sanitizeForSheets(analysis['שם הפונה'] || ''),
       'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
@@ -151,7 +144,7 @@ app.post('/webhook', async (req, res) => {
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
       'טלפון': sender,
-      'קישור לתמונה': analysis['קישור לתמונה'] || imageUrl || '',
+      'קישור לתמונה': imageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
       'source': 'gupshup',
@@ -161,7 +154,7 @@ app.post('/webhook', async (req, res) => {
     await appendToSheet(row);
     console.log(`✅ Complaint from ${sender} logged with type: ${messageType}`);
     return res.status(200).json({ status: 'success', messageId });
-    */
+
   } catch (error) {
     console.error('❌ Webhook error:', error);
     return res.status(500).json({ error: 'Internal server error' });
