@@ -56,42 +56,76 @@ async function getMediaUrlFromMeta(mediaId) {
     console.log(`🔍 Making request to: https://graph.facebook.com/v18.0/${mediaId}`);
     console.log(`🔍 Using access token length: ${accessToken.length} characters`);
     
-    // First, get media info from Meta API
-    const mediaInfoResponse = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': 'CityhallBot/1.0'
+    // First, get media info from Meta API - try multiple API versions
+    const apiVersions = ['v20.0', 'v19.0', 'v18.0'];
+    let mediaInfoResponse = null;
+    let lastError = null;
+    
+    for (const version of apiVersions) {
+      const apiUrl = `https://graph.facebook.com/${version}/${mediaId}`;
+      console.log(`🔄 Trying Meta API version: ${apiUrl}`);
+      
+      try {
+        mediaInfoResponse = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'User-Agent': 'CityhallBot/1.0',
+            'Accept': 'application/json'
+          },
+          timeout: 10000 // 10 second timeout
+        });
+        
+        console.log(`📡 API ${version} Response Status: ${mediaInfoResponse.status} ${mediaInfoResponse.statusText}`);
+        
+        if (mediaInfoResponse.ok) {
+          console.log(`✅ Successfully connected to Meta API ${version}`);
+          break;
+        } else {
+          const errorText = await mediaInfoResponse.text();
+          console.warn(`⚠️ API ${version} failed with ${mediaInfoResponse.status}: ${errorText.substring(0, 200)}`);
+          lastError = errorText;
+        }
+      } catch (fetchError) {
+        console.warn(`⚠️ API ${version} connection failed:`, fetchError.message);
+        lastError = fetchError.message;
       }
-    });
+    }
     
-    console.log(`📡 Meta API Response Status: ${mediaInfoResponse.status} ${mediaInfoResponse.statusText}`);
-    console.log(`📡 Meta API Response Headers:`, Object.fromEntries(mediaInfoResponse.headers.entries()));
-    
-    if (!mediaInfoResponse.ok) {
-      const errorText = await mediaInfoResponse.text();
-      console.error(`❌ Meta Media API error (${mediaInfoResponse.status}): ${errorText}`);
-      console.error(`❌ Full response details:`, {
-        status: mediaInfoResponse.status,
-        statusText: mediaInfoResponse.statusText,
-        headers: Object.fromEntries(mediaInfoResponse.headers.entries()),
-        body: errorText
-      });
+    if (!mediaInfoResponse || !mediaInfoResponse.ok) {
+      console.error(`❌ All Meta API versions failed. Last error: ${lastError}`);
       return null;
     }
+    
+    console.log(`📡 Final Meta API Response Headers:`, Object.fromEntries(mediaInfoResponse.headers.entries()));
     
     const mediaInfo = await mediaInfoResponse.json();
     console.log(`📄 Meta media info:`, JSON.stringify(mediaInfo, null, 2));
     
-    if (!mediaInfo.url) {
-      console.error(`❌ No URL in Meta media info response`);
+    // Try multiple ways to extract the media URL
+    let mediaUrl = null;
+    
+    if (mediaInfo.url) {
+      mediaUrl = mediaInfo.url;
+      console.log(`✅ Found media URL in 'url' field: ${mediaUrl}`);
+    } else if (mediaInfo.cdn_url) {
+      mediaUrl = mediaInfo.cdn_url;
+      console.log(`✅ Found media URL in 'cdn_url' field: ${mediaUrl}`);
+    } else if (mediaInfo.download_url) {
+      mediaUrl = mediaInfo.download_url;
+      console.log(`✅ Found media URL in 'download_url' field: ${mediaUrl}`);
+    } else {
+      console.error(`❌ No URL found in Meta media info response`);
       console.error(`❌ Available fields in response:`, Object.keys(mediaInfo));
-      return null;
+      
+      // As fallback, try to construct a temporary WhatsApp media URL
+      // Note: This might not work but worth trying
+      const fallbackUrl = `https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=${mediaId}`;
+      console.log(`🔄 Trying fallback URL construction: ${fallbackUrl}`);
+      return fallbackUrl;
     }
     
-    // The media URL is directly available in the media info
-    const mediaUrl = mediaInfo.url;
     console.log(`✅ Retrieved Meta media URL: ${mediaUrl}`);
-    
     return mediaUrl;
     
   } catch (error) {
@@ -787,7 +821,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v6-meta-api-comprehensive',
+    version: 'debug-v7-meta-api-improved',
     timestamp: new Date().toISOString()
   });
 });
