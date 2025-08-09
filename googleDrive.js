@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import fs from 'fs';
 import fetch from 'node-fetch';
+import { Readable } from 'stream';
 import { ConfigurationError } from './utils/errors.js';
 
 const SCOPES = [
@@ -143,7 +144,7 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
     
     const media = {
       mimeType: contentType,
-      body: require('stream').Readable.from(buffer),
+      body: Readable.from(buffer),
     };
     
     console.log(`📤 Uploading image to Drive: ${filename}`);
