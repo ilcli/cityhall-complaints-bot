@@ -53,17 +53,29 @@ async function getMediaUrlFromMeta(mediaId) {
   
   try {
     console.log(`🔍 Retrieving media URL for Meta Media ID: ${mediaId}`);
+    console.log(`🔍 Making request to: https://graph.facebook.com/v18.0/${mediaId}`);
+    console.log(`🔍 Using access token length: ${accessToken.length} characters`);
     
     // First, get media info from Meta API
     const mediaInfoResponse = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
       headers: {
-        'Authorization': `Bearer ${accessToken}`
+        'Authorization': `Bearer ${accessToken}`,
+        'User-Agent': 'CityhallBot/1.0'
       }
     });
+    
+    console.log(`📡 Meta API Response Status: ${mediaInfoResponse.status} ${mediaInfoResponse.statusText}`);
+    console.log(`📡 Meta API Response Headers:`, Object.fromEntries(mediaInfoResponse.headers.entries()));
     
     if (!mediaInfoResponse.ok) {
       const errorText = await mediaInfoResponse.text();
       console.error(`❌ Meta Media API error (${mediaInfoResponse.status}): ${errorText}`);
+      console.error(`❌ Full response details:`, {
+        status: mediaInfoResponse.status,
+        statusText: mediaInfoResponse.statusText,
+        headers: Object.fromEntries(mediaInfoResponse.headers.entries()),
+        body: errorText
+      });
       return null;
     }
     
@@ -72,6 +84,7 @@ async function getMediaUrlFromMeta(mediaId) {
     
     if (!mediaInfo.url) {
       console.error(`❌ No URL in Meta media info response`);
+      console.error(`❌ Available fields in response:`, Object.keys(mediaInfo));
       return null;
     }
     
@@ -82,7 +95,8 @@ async function getMediaUrlFromMeta(mediaId) {
     return mediaUrl;
     
   } catch (error) {
-    console.error('❌ Failed to retrieve media URL:', error.message);
+    console.error('❌ Failed to retrieve media URL - FULL ERROR:', error);
+    console.error('❌ Error stack:', error.stack);
     return null;
   }
 }
@@ -263,8 +277,8 @@ function parseWebhookPayload(body) {
         if (messageType === 'text') {
           messagePayload.text = message.text?.body || '';
         } else if (messageType === 'image') {
-          // Fix: Caption is at message level for Meta webhooks, not inside image object
-          messagePayload.caption = message.caption || '';
+          // Fix: Caption can be at message level OR image level depending on Meta webhook format
+          messagePayload.caption = message.image?.caption || message.caption || '';
           // Fix: Meta doesn't provide direct URL, only media ID for API retrieval
           messagePayload.url = ''; // Meta doesn't provide direct URL in webhook
           messagePayload.id = message.image?.id || '';
@@ -366,10 +380,20 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
     console.log(`   Initial Image URL: ${tempImageUrl}`);
     console.log(`   Image ID: ${messagePayload.id}`);
     
+    // Debug: Check conditions before Meta API call
+    console.log(`🔍 Meta API call conditions:`);
+    console.log(`   tempImageUrl: "${tempImageUrl}"`);
+    console.log(`   messagePayload.id: "${messagePayload.id}"`);
+    console.log(`   Will call Meta API: ${!tempImageUrl && messagePayload.id ? 'YES' : 'NO'}`);
+    
     // If we don't have a direct URL but have an ID, try to get it from Meta API
     if (!tempImageUrl && messagePayload.id) {
       console.log(`🔄 No direct URL found, attempting to retrieve from Meta API...`);
+      console.log(`🔄 CALLING getMediaUrlFromMeta with ID: "${messagePayload.id}"`);
+      
       tempImageUrl = await getMediaUrlFromMeta(messagePayload.id);
+      
+      console.log(`🔄 getMediaUrlFromMeta RETURNED: "${tempImageUrl}"`);
       
       if (tempImageUrl) {
         console.log(`✅ Successfully retrieved URL from Meta API: ${tempImageUrl}`);
@@ -380,6 +404,7 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
       console.log(`✅ Using direct URL from webhook: ${tempImageUrl}`);
     } else {
       console.error(`❌ No image URL available: no direct URL and no media ID`);
+      console.error(`   Debug: tempImageUrl="${tempImageUrl}", messagePayload.id="${messagePayload.id}"`);
     }
     
     imageUrl = tempImageUrl;
@@ -762,7 +787,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v4-meta-parsing',
+    version: 'debug-v6-meta-api-comprehensive',
     timestamp: new Date().toISOString()
   });
 });
