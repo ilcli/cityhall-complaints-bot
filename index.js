@@ -251,9 +251,17 @@ function parseWebhookPayload(body) {
           messagePayload.text = message.text?.body || '';
         } else if (messageType === 'image') {
           messagePayload.caption = message.image?.caption || '';
-          messagePayload.url = message.image?.link || '';
+          messagePayload.url = message.image?.url || message.image?.link || ''; // Meta uses 'url' not 'link'
           messagePayload.id = message.image?.id || '';
           messagePayload.mimeType = message.image?.mime_type || '';
+          
+          // Log what we got from Meta webhook
+          console.log(`📷 Meta image webhook data:`, {
+            id: messagePayload.id,
+            url: messagePayload.url,
+            caption: messagePayload.caption,
+            mimeType: messagePayload.mimeType
+          });
         } else {
           console.log(`⚠️ Unsupported Meta message type: ${messageType}`);
           return { messageData: null, source: 'whatsapp' };
@@ -619,6 +627,9 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const { messageText, imageUrl, confidence } = messageContent;
     
     console.log(`📋 Message processing result: text="${messageText ? messageText.substring(0, 100) : '(empty)'}...", image=${!!imageUrl}, confidence=${confidence}`);
+    if (!imageUrl && messageType === 'image') {
+      console.error(`❌ Image message but no URL extracted! Payload:`, messagePayload);
+    }
 
     // Extract phone numbers and names from message text
     const extractedInfo = extractContactInfo(messageText);
