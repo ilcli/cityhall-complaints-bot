@@ -528,6 +528,9 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
     
     imageUrl = tempImageUrl;
     console.log(`📷 Final Image URL for storage: ${imageUrl || 'NULL'}`);
+    console.log(`📷 DEBUG: tempImageUrl = "${tempImageUrl}"`);
+    console.log(`📷 DEBUG: imageUrl = "${imageUrl}"`);
+    console.log(`📷 DEBUG: Image processing flow completed for message type: ${messageType}`);
 
     // Store this image for potential future pairing
     messageStore.storeImage(sender, imageUrl, caption, timestampMs);
@@ -804,17 +807,37 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     // Convert image to Base64 for direct storage in Google Sheets
     let base64Image = null;
     let imageUrlForStorage = null;
+    
+    console.log(`🔍 DEBUG: Image processing status check:`);
+    console.log(`   imageUrl: "${imageUrl}"`);
+    console.log(`   imageUrl type: ${typeof imageUrl}`);
+    console.log(`   imageUrl truthy: ${!!imageUrl}`);
+    
     if (imageUrl) {
       console.log(`🖼️ Processing image conversion to Base64...`);
-      base64Image = await convertImageToBase64(imageUrl);
+      console.log(`🖼️ Calling convertImageToBase64 with URL: ${imageUrl}`);
+      
+      try {
+        base64Image = await convertImageToBase64(imageUrl);
+        console.log(`🖼️ convertImageToBase64 returned: ${base64Image ? 'SUCCESS' : 'NULL/FAILED'}`);
+      } catch (base64Error) {
+        console.error(`❌ convertImageToBase64 threw error:`, base64Error.message);
+        console.error(`   Error stack:`, base64Error.stack);
+      }
       
       if (base64Image) {
-        console.log(`✅ Image converted to Base64 for inline storage`);
+        console.log(`✅ Image converted to Base64 for inline storage (length: ${base64Image.length})`);
         imageUrlForStorage = imageUrl; // Keep original URL as backup
       } else {
         console.warn(`⚠️ Could not convert image to Base64, storing URL only`);
         imageUrlForStorage = imageUrl; // Store original URL
       }
+    } else {
+      console.log(`🔍 NO IMAGE URL - investigating why:`);
+      console.log(`   messageType: ${messageType}`);
+      console.log(`   messagePayload.id: ${messagePayload?.id}`);
+      console.log(`   messagePayload.url: ${messagePayload?.url}`);
+      console.log(`   messagePayload.link: ${messagePayload?.link}`);
     }
 
     // Prioritize extracted info over sender data and AI analysis
@@ -908,6 +931,57 @@ app.get('/health', (req, res) => {
     version: 'debug-v10-webhook-flow',
     timestamp: new Date().toISOString()
   });
+});
+
+// Test endpoint to check Meta API token
+app.get('/admin/test-meta-token', async (req, res) => {
+  try {
+    const accessToken = process.env.META_ACCESS_TOKEN;
+    
+    if (!accessToken) {
+      return res.status(400).json({ 
+        error: 'META_ACCESS_TOKEN not configured',
+        status: 'failed'
+      });
+    }
+    
+    console.log(`🧪 Testing Meta API token (length: ${accessToken.length})`);
+    
+    // Test with a simple API call
+    const testUrl = 'https://graph.facebook.com/v20.0/me';
+    const response = await fetch(testUrl, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+    
+    const result = await response.json();
+    
+    console.log(`📡 Meta API test response:`, result);
+    
+    if (response.ok) {
+      res.json({
+        status: 'success',
+        message: 'Meta API token is working',
+        tokenLength: accessToken.length,
+        apiResponse: result
+      });
+    } else {
+      res.status(400).json({
+        status: 'failed',
+        message: 'Meta API token failed',
+        error: result,
+        tokenLength: accessToken.length
+      });
+    }
+  } catch (error) {
+    console.error('❌ Meta API test failed:', error.message);
+    res.status(500).json({
+      status: 'error',
+      message: error.message
+    });
+  }
 });
 
 // Special endpoint to recreate dashboard in Hebrew
