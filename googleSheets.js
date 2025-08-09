@@ -363,6 +363,64 @@ export async function updateDashboardStats(stats = {}) {
 }
 
 /**
+ * Ensures the Complaints sheet exists
+ */
+async function ensureComplaintsSheet(sheets) {
+  try {
+    const spreadsheet = await sheets.spreadsheets.get({
+      spreadsheetId: process.env.SHEET_ID
+    });
+    
+    const complaintsExists = spreadsheet.data.sheets.some(
+      sheet => sheet.properties.title === 'Complaints'
+    );
+    
+    if (!complaintsExists) {
+      // Create Complaints sheet with headers
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: process.env.SHEET_ID,
+        resource: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: 'Complaints',
+                index: 1 // Place after Dashboard
+              }
+            }
+          }]
+        }
+      });
+      
+      // Add headers to the new sheet
+      const headers = [[
+        'תאריך ושעה',
+        'תוכן הפנייה', 
+        'שם הפונה',
+        'טלפון',
+        'קישור לתמונה',
+        'קטגוריה',
+        'רמת דחיפות',
+        'סוג הפנייה',
+        'מחלקה אחראית',
+        'מקור'
+      ]];
+      
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: process.env.SHEET_ID,
+        range: 'Complaints!A1:J1',
+        valueInputOption: 'RAW',
+        resource: { values: headers }
+      });
+      
+      console.log('✅ Complaints sheet created with headers');
+    }
+  } catch (error) {
+    console.error('❌ Failed to ensure Complaints sheet exists:', error.message);
+    throw error;
+  }
+}
+
+/**
  * Appends a row to the Google Sheet
  * @param {object} row - Row data to append
  * @throws {Error} - If sheet update fails
@@ -375,18 +433,21 @@ export async function appendToSheet(row) {
     const client = await auth.getClient();
     const sheets = google.sheets({ version: 'v4', auth: client });
 
-  const values = [[
-    row['תאריך ושעה'] || '',
-    row['תוכן הפנייה'] || '',
-    row['שם הפונה'] || '',
-    row['טלפון'] || '',
-    row['קישור לתמונה'] || '',
-    row['קטגוריה'] || '',
-    row['רמת דחיפות'] || '',
-    row['סוג הפנייה'] || '',
-    row['מחלקה אחראית'] || '',
-    row['source'] || '',
-  ]];
+    // Ensure Complaints sheet exists
+    await ensureComplaintsSheet(sheets);
+
+    const values = [[
+      row['תאריך ושעה'] || '',
+      row['תוכן הפנייה'] || '',
+      row['שם הפונה'] || '',
+      row['טלפון'] || '',
+      row['קישור לתמונה'] || '',
+      row['קטגוריה'] || '',
+      row['רמת דחיפות'] || '',
+      row['סוג הפנייה'] || '',
+      row['מחלקה אחראית'] || '',
+      row['source'] || '',
+    ]];
 
     console.log('Appending row:', JSON.stringify(values, null, 2));
 
