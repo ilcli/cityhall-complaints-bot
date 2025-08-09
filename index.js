@@ -245,9 +245,13 @@ function parseWebhookPayload(body) {
         const timestampMs = parseInt(message.timestamp) * 1000; // Convert from seconds to milliseconds
         const messageId = message.id;
         
+        // Debug: Log ALL message types for comprehensive debugging
+        console.log(`🔍 DEBUG ACTIVE - Message type: ${messageType}, Sender: ${sender}`);
+        
         // Debug: Log raw message structure for images
         if (messageType === 'image') {
           console.log(`🔍 Raw Meta image message structure:`, JSON.stringify(message, null, 2));
+          console.log(`🔍 IMAGE DETECTED - Processing image message from ${sender}`);
         }
         
         let messagePayload = {};
@@ -748,7 +752,11 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 }
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
+  res.status(200).json({ 
+    status: 'healthy',
+    version: 'debug-v2-active',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Special endpoint to recreate dashboard in Hebrew
