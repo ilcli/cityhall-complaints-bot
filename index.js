@@ -480,37 +480,50 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
     const caption = messagePayload.caption || '';
     let tempImageUrl = messagePayload.url || messagePayload.link || '';
     
-    console.log(`📸 Processing image from ${sender}:`);
-    console.log(`   Caption: "${caption}"`);
-    console.log(`   Raw payload:`, JSON.stringify(messagePayload, null, 2));
-    console.log(`   Initial Image URL: ${tempImageUrl}`);
-    console.log(`   Image ID: ${messagePayload.id}`);
-    
-    // Debug: Check conditions before Meta API call
-    console.log(`🔍 Meta API call conditions:`);
-    console.log(`   tempImageUrl: "${tempImageUrl}"`);
-    console.log(`   messagePayload.id: "${messagePayload.id}"`);
-    console.log(`   Will call Meta API: ${!tempImageUrl && messagePayload.id ? 'YES' : 'NO'}`);
-    
-    // If we don't have a direct URL but have an ID, try to get it from Meta API
-    if (!tempImageUrl && messagePayload.id) {
-      console.log(`🔄 No direct URL found, attempting to retrieve from Meta API...`);
-      console.log(`🔄 CALLING getMediaUrlFromMeta with ID: "${messagePayload.id}"`);
+    try {
+      console.log(`📸 Processing image from ${sender}:`);
       
-      tempImageUrl = await getMediaUrlFromMeta(messagePayload.id);
+      console.log(`   Caption: "${caption}"`);
+      console.log(`   Raw payload:`, JSON.stringify(messagePayload, null, 2));
+      console.log(`   Initial Image URL: ${tempImageUrl}`);
+      console.log(`   Image ID: ${messagePayload.id}`);
       
-      console.log(`🔄 getMediaUrlFromMeta RETURNED: "${tempImageUrl}"`);
+      // Debug: Check conditions before Meta API call
+      console.log(`🔍 Meta API call conditions:`);
+      console.log(`   tempImageUrl: "${tempImageUrl}"`);
+      console.log(`   messagePayload.id: "${messagePayload.id}"`);
+      console.log(`   Will call Meta API: ${!tempImageUrl && messagePayload.id ? 'YES' : 'NO'}`);
       
-      if (tempImageUrl) {
-        console.log(`✅ Successfully retrieved URL from Meta API: ${tempImageUrl}`);
+      // If we don't have a direct URL but have an ID, try to get it from Meta API
+      if (!tempImageUrl && messagePayload.id) {
+        console.log(`🔄 No direct URL found, attempting to retrieve from Meta API...`);
+        console.log(`🔄 CALLING getMediaUrlFromMeta with ID: "${messagePayload.id}"`);
+        
+        try {
+          tempImageUrl = await getMediaUrlFromMeta(messagePayload.id);
+          console.log(`🔄 getMediaUrlFromMeta RETURNED: "${tempImageUrl}"`);
+        } catch (metaError) {
+          console.error(`❌ getMediaUrlFromMeta threw error:`, metaError.message);
+          console.error(`   Error stack:`, metaError.stack);
+        }
+        
+        if (tempImageUrl) {
+          console.log(`✅ Successfully retrieved URL from Meta API: ${tempImageUrl}`);
+        } else {
+          console.error(`❌ Failed to retrieve URL from Meta API for ID: ${messagePayload.id}`);
+        }
+      } else if (tempImageUrl) {
+        console.log(`✅ Using direct URL from webhook: ${tempImageUrl}`);
       } else {
-        console.error(`❌ Failed to retrieve URL from Meta API for ID: ${messagePayload.id}`);
+        console.error(`❌ No image URL available: no direct URL and no media ID`);
+        console.error(`   Debug: tempImageUrl="${tempImageUrl}", messagePayload.id="${messagePayload.id}"`);
       }
-    } else if (tempImageUrl) {
-      console.log(`✅ Using direct URL from webhook: ${tempImageUrl}`);
-    } else {
-      console.error(`❌ No image URL available: no direct URL and no media ID`);
-      console.error(`   Debug: tempImageUrl="${tempImageUrl}", messagePayload.id="${messagePayload.id}"`);
+      
+      console.log(`📸 IMAGE PROCESSING COMPLETED SUCCESSFULLY`);
+      
+    } catch (imageError) {
+      console.error(`❌ CRITICAL ERROR in image processing:`, imageError.message);
+      console.error(`   Error stack:`, imageError.stack);
     }
     
     imageUrl = tempImageUrl;
@@ -808,19 +821,18 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
     const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
 
-    // Prepare row for Google Sheets with Base64 image data
+    // Prepare row for Google Sheets with updated structure
     const row = {
-      'שם הפונה': sanitizeForSheets(finalName),
-      'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
-      'רמת דחיפות': sanitizeForSheets(analysis['רמת דחיפות'] || ''),
-      'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
+      'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
+      'שם הפונה': sanitizeForSheets(finalName),
       'טלפון': finalPhone,
-      'קישור לתמונה': imageUrlForStorage || '',
       'תמונה': base64Image || '', // Base64 image data for inline display
-      'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
+      'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
+      'סטטוס טיפול': 'טרם טופל', // Default status
+      'הערות': '', // Empty notes field for staff
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
-      'source': `${source}:${confidence}`,
+      'גורם מטפל': '' // Assigned staff member (empty initially)
     };
 
     // Log specific image storage status before sending to sheet

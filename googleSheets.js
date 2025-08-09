@@ -330,6 +330,66 @@ async function getDashboardSheetId(sheets) {
 }
 
 /**
+ * Gets the Complaints sheet ID
+ */
+async function getComplaintsSheetId(sheets) {
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: process.env.SHEET_ID
+  });
+  
+  const complaintsSheet = spreadsheet.data.sheets.find(
+    sheet => sheet.properties.title === 'Complaints'
+  );
+  
+  return complaintsSheet ? complaintsSheet.properties.sheetId : 0;
+}
+
+/**
+ * Adds data validation for status column dropdown
+ */
+async function addStatusValidation(sheets) {
+  try {
+    const sheetId = await getComplaintsSheetId(sheets);
+    
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: process.env.SHEET_ID,
+      resource: {
+        requests: [{
+          setDataValidation: {
+            range: {
+              sheetId: sheetId,
+              startRowIndex: 1, // Start from row 2 (after headers)
+              endRowIndex: 1000, // Apply to first 1000 rows
+              startColumnIndex: 6, // Column G (סטטוס טיפול)
+              endColumnIndex: 7
+            },
+            rule: {
+              condition: {
+                type: 'ONE_OF_LIST',
+                values: [
+                  { userEnteredValue: 'טרם טופל' },
+                  { userEnteredValue: 'בטיפול' },
+                  { userEnteredValue: 'טופל' },
+                  { userEnteredValue: 'סגור' }
+                ]
+              },
+              inputMessage: 'בחר סטטוס טיפול מהרשימה',
+              showCustomUi: true,
+              strict: false // Allow other values too
+            }
+          }
+        }]
+      }
+    });
+    
+    console.log('✅ Status validation dropdown added to column G');
+  } catch (error) {
+    console.warn('⚠️ Failed to add status validation:', error.message);
+    // Don't throw - validation is nice to have but not critical
+  }
+}
+
+/**
  * Updates dashboard with real-time bot statistics
  * @param {object} stats - Bot performance statistics
  */
@@ -391,29 +451,31 @@ async function ensureComplaintsSheet(sheets) {
         }
       });
       
-      // Add headers to the new sheet with Base64 image column
+      // Add headers to the new sheet with updated structure
       const headers = [[
         'תאריך ושעה',
         'תוכן הפנייה', 
         'שם הפונה',
         'טלפון',
-        'קישור לתמונה',
         'תמונה',
         'קטגוריה',
-        'רמת דחיפות',
-        'סוג הפנייה',
+        'סטטוס טיפול',
+        'הערות',
         'מחלקה אחראית',
-        'מקור'
+        'גורם מטפל'
       ]];
       
       await sheets.spreadsheets.values.update({
         spreadsheetId: process.env.SHEET_ID,
-        range: 'Complaints!A1:K1',
+        range: 'Complaints!A1:J1',
         valueInputOption: 'RAW',
         resource: { values: headers }
       });
       
-      console.log('✅ Complaints sheet created with headers');
+      // Add data validation for status column (column G = סטטוס טיפול)
+      await addStatusValidation(sheets);
+      
+      console.log('✅ Complaints sheet created with headers and validation');
     }
   } catch (error) {
     console.error('❌ Failed to ensure Complaints sheet exists:', error.message);
@@ -442,20 +504,19 @@ export async function appendToSheet(row) {
       row['תוכן הפנייה'] || '',
       row['שם הפונה'] || '',
       row['טלפון'] || '',
-      row['קישור לתמונה'] || '',
       row['תמונה'] || '', // Base64 image data
       row['קטגוריה'] || '',
-      row['רמת דחיפות'] || '',
-      row['סוג הפנייה'] || '',
+      row['סטטוס טיפול'] || 'טרם טופל', // Default status
+      row['הערות'] || '', // Staff notes
       row['מחלקה אחראית'] || '',
-      row['source'] || '',
+      row['גורם מטפל'] || '' // Assigned staff member
     ]];
 
     console.log('Appending row:', JSON.stringify(values, null, 2));
 
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'Complaints!A:K', // Updated range to include new column
+      range: 'Complaints!A:J', // Updated range for 10 columns
       valueInputOption: 'USER_ENTERED', // Allows IMAGE() formulas to work
       insertDataOption: 'INSERT_ROWS',
       resource: { values },
