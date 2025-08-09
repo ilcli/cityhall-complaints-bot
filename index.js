@@ -32,18 +32,23 @@ let performanceStats = {
  * @returns {string|null} - Media URL or null if failed
  */
 async function getMediaUrlFromMeta(mediaId) {
-  if (!mediaId) return null;
+  if (!mediaId) {
+    console.warn('⚠️ No media ID provided to getMediaUrlFromMeta');
+    return null;
+  }
   
   const accessToken = process.env.META_ACCESS_TOKEN;
   if (!accessToken) {
-    console.warn('⚠️ META_ACCESS_TOKEN not configured, cannot retrieve media URLs');
+    console.error('❌ META_ACCESS_TOKEN not configured - cannot retrieve WhatsApp media URLs from Meta API');
+    console.error('   Please add META_ACCESS_TOKEN to your Railway environment variables');
+    console.error('   Get it from: https://developers.facebook.com/apps/your-app/whatsapp-business/wa-dev-console/');
     return null;
   }
   
   try {
-    console.log(`🔍 Retrieving media URL for ID: ${mediaId}`);
+    console.log(`🔍 Retrieving media URL for Meta Media ID: ${mediaId}`);
     
-    // First, get media info
+    // First, get media info from Meta API
     const mediaInfoResponse = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`
@@ -51,28 +56,22 @@ async function getMediaUrlFromMeta(mediaId) {
     });
     
     if (!mediaInfoResponse.ok) {
-      console.error(`❌ Meta Media API error: ${mediaInfoResponse.status}`);
+      const errorText = await mediaInfoResponse.text();
+      console.error(`❌ Meta Media API error (${mediaInfoResponse.status}): ${errorText}`);
       return null;
     }
     
     const mediaInfo = await mediaInfoResponse.json();
-    console.log(`📄 Media info:`, mediaInfo);
+    console.log(`📄 Meta media info:`, JSON.stringify(mediaInfo, null, 2));
     
-    // Get the actual media content URL
-    const mediaResponse = await fetch(mediaInfo.url, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      }
-    });
-    
-    if (!mediaResponse.ok) {
-      console.error(`❌ Meta Media download error: ${mediaResponse.status}`);
+    if (!mediaInfo.url) {
+      console.error(`❌ No URL in Meta media info response`);
       return null;
     }
     
-    // The media URL from the response
+    // The media URL is directly available in the media info
     const mediaUrl = mediaInfo.url;
-    console.log(`✅ Retrieved media URL: ${mediaUrl}`);
+    console.log(`✅ Retrieved Meta media URL: ${mediaUrl}`);
     
     return mediaUrl;
     
@@ -217,6 +216,13 @@ app.post('/webhook', async (req, res) => {
       'source': `${source}:${confidence}`,
     };
 
+    // Log specific image URL status before sending to sheet
+    if (imageUrl) {
+      console.log(`🖼️ Image URL will be stored in sheet: ${imageUrl}`);
+    } else {
+      console.log(`⚠️ No image URL available for storage`);
+    }
+    
     console.log(`📝 Row data to be sent to sheet:`, row);
     
     // Add performance stats for dashboard update
@@ -401,6 +407,7 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
     
     console.log(`📸 Processing image from ${sender}:`);
     console.log(`   Caption: "${caption}"`);
+    console.log(`   Raw payload:`, JSON.stringify(messagePayload, null, 2));
     console.log(`   Initial Image URL: ${tempImageUrl}`);
     console.log(`   Image ID: ${messagePayload.id}`);
     
@@ -408,10 +415,20 @@ async function processMessageWithContext(messageType, messagePayload, sender, ti
     if (!tempImageUrl && messagePayload.id) {
       console.log(`🔄 No direct URL found, attempting to retrieve from Meta API...`);
       tempImageUrl = await getMediaUrlFromMeta(messagePayload.id);
+      
+      if (tempImageUrl) {
+        console.log(`✅ Successfully retrieved URL from Meta API: ${tempImageUrl}`);
+      } else {
+        console.error(`❌ Failed to retrieve URL from Meta API for ID: ${messagePayload.id}`);
+      }
+    } else if (tempImageUrl) {
+      console.log(`✅ Using direct URL from webhook: ${tempImageUrl}`);
+    } else {
+      console.error(`❌ No image URL available: no direct URL and no media ID`);
     }
     
     imageUrl = tempImageUrl;
-    console.log(`📷 Final Image URL: ${imageUrl}`);
+    console.log(`📷 Final Image URL for storage: ${imageUrl || 'NULL'}`);
 
     // Store this image for potential future pairing
     messageStore.storeImage(sender, imageUrl, caption, timestampMs);

@@ -392,7 +392,7 @@ export async function appendToSheet(row) {
 
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'A:J',
+      range: 'Complaints!A:J',
       valueInputOption: 'USER_ENTERED', // Safer than RAW for user input
       insertDataOption: 'INSERT_ROWS',
       resource: { values },
