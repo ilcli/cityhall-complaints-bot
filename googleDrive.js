@@ -13,8 +13,8 @@ const credsPath = './creds/service-account.json';
 let auth = null;
 let driveService = null;
 
-// Shared folder ID provided by user - resolves service account storage quota issue
-const SHARED_FOLDER_ID = '1pj0xHUKVFxMaYz3Eww3PXwCajq_3nGTN';
+// Shared folder ID from environment variable - resolves service account storage quota issue
+const SHARED_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '1pj0xHUKVFxMaYz3Eww3PXwCajq_3nGTN';
 
 /**
  * Initialize Google Drive auth (reuses same service account as Sheets)
