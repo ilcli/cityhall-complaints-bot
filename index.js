@@ -34,12 +34,16 @@ let performanceStats = {
  * @returns {string|null} - Media URL or null if failed
  */
 async function getMediaUrlFromMeta(mediaId) {
+  console.log(`🔍 getMediaUrlFromMeta called with mediaId: "${mediaId}"`);
+  
   if (!mediaId) {
     console.warn('⚠️ No media ID provided to getMediaUrlFromMeta');
     return null;
   }
   
   const accessToken = process.env.META_ACCESS_TOKEN;
+  console.log(`🔑 META_ACCESS_TOKEN available: ${accessToken ? 'YES (length: ' + accessToken.length + ')' : 'NO'}`);
+  
   if (!accessToken) {
     console.error('❌ META_ACCESS_TOKEN not configured - cannot retrieve WhatsApp media URLs from Meta API');
     console.error('   Please add META_ACCESS_TOKEN to your Railway environment variables');
@@ -754,7 +758,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v2-active',
+    version: 'debug-v3-meta-api',
     timestamp: new Date().toISOString()
   });
 });
