@@ -694,6 +694,27 @@ app.post('/admin/recreate-dashboard', async (req, res) => {
   }
 });
 
+// Admin endpoint to clear message store for testing
+app.post('/admin/clear-store', (req, res) => {
+  try {
+    const statsBefore = messageStore.getStats();
+    messageStore.clear();
+    console.log('🧹 Message store cleared by admin');
+    res.json({ 
+      status: 'success', 
+      message: 'Message store cleared successfully',
+      statsBefore,
+      statsAfter: messageStore.getStats()
+    });
+  } catch (error) {
+    console.error('❌ Failed to clear message store:', error.message);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
+  }
+});
+
 app.listen(PORT, async () => {
   console.log(`🚀 Server live on port ${PORT}`);
   console.log(`🔒 Webhook auth: ${process.env.WEBHOOK_SECRET ? 'enabled' : 'disabled'}`);
