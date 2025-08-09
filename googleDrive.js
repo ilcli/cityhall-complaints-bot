@@ -104,7 +104,8 @@ async function downloadImage(imageUrl, accessToken = null) {
       throw new Error(`Failed to download image: ${response.status} ${response.statusText}`);
     }
     
-    const buffer = await response.buffer();
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
     const contentType = response.headers.get('content-type') || 'image/jpeg';
     
     console.log(`✅ Downloaded image (${buffer.length} bytes, type: ${contentType})`);
@@ -142,7 +143,7 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
     
     const media = {
       mimeType: contentType,
-      body: buffer,
+      body: require('stream').Readable.from(buffer),
     };
     
     console.log(`📤 Uploading image to Drive: ${filename}`);

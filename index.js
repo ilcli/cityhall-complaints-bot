@@ -118,11 +118,13 @@ async function getMediaUrlFromMeta(mediaId) {
       console.error(`❌ No URL found in Meta media info response`);
       console.error(`❌ Available fields in response:`, Object.keys(mediaInfo));
       
-      // As fallback, try to construct a temporary WhatsApp media URL
-      // Note: This might not work but worth trying
-      const fallbackUrl = `https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=${mediaId}`;
-      console.log(`🔄 Trying fallback URL construction: ${fallbackUrl}`);
-      return fallbackUrl;
+      // Log that we need a new access token
+      console.error(`🔑 URGENT: Meta access token expired! Please update META_ACCESS_TOKEN in Railway environment.`);
+      console.error(`   Current error suggests token expired. Get new token from:`);  
+      console.error(`   https://developers.facebook.com/apps/your-app/whatsapp-business/wa-dev-console/`);
+      
+      // Return null instead of fallback URL since it won't work without proper token
+      return null;
     }
     
     console.log(`✅ Retrieved Meta media URL: ${mediaUrl}`);
@@ -225,12 +227,16 @@ app.post('/webhook', async (req, res) => {
 
     const { messageType, sender, timestampMs, messagePayload, messageId } = messageData;
     
+    console.log(`🔥 EXTRACTED MESSAGE DATA: type=${messageType}, id=${messageId}, payloadId=${messagePayload.id}`);
+    
     // Check for duplicates
     if (messageStore.isProcessed(messageId)) {
       console.log(`⚠️ Duplicate message ignored: ${messageId}`);
       return res.status(200).send('Duplicate');
     }
     messageStore.markProcessed(messageId);
+    
+    console.log(`🔥 ABOUT TO RESPOND TO WEBHOOK`);
     
     // IMPORTANT: Respond immediately to prevent webhook timeout
     res.status(200).json({ 
@@ -239,11 +245,15 @@ app.post('/webhook', async (req, res) => {
       message: 'Message queued for processing'
     });
     
+    console.log(`🔥 WEBHOOK RESPONSE SENT, ENQUEUEING...`);
+    
     // Queue message for background processing
     await messageQueue.enqueue(
       { messageType, sender, timestampMs, messagePayload, messageId, source, startTime },
       processMessageInBackground
     );
+    
+    console.log(`🔥 MESSAGE ENQUEUED SUCCESSFULLY`);
     
   } catch (error) {
     console.error('❌ Webhook error:', error);
@@ -828,7 +838,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v9-visible-markers',
+    version: 'debug-v10-webhook-flow',
     timestamp: new Date().toISOString()
   });
 });
