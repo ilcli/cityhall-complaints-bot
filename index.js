@@ -387,10 +387,12 @@ function parseWebhookPayload(body) {
 
 // Intelligent message processing with context awareness
 async function processMessageWithContext(messageType, messagePayload, sender, timestampMs) {
+  console.log(`🚨🚨🚨 FUNCTION ENTRY DEBUG ACTIVE 🚨🚨🚨`);
   console.log(`🔍 processMessageWithContext CALLED with:`);
   console.log(`   messageType: "${messageType}"`);
   console.log(`   sender: "${sender}"`);
-  console.log(`   messagePayload:`, JSON.stringify(messagePayload, null, 2));
+  console.log(`   messagePayload.id: "${messagePayload.id}"`);
+  console.log(`🚨🚨🚨 END FUNCTION ENTRY 🚨🚨🚨`);
   
   let messageText = '';
   let imageUrl = null;
@@ -826,7 +828,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v8-function-entry',
+    version: 'debug-v9-visible-markers',
     timestamp: new Date().toISOString()
   });
 });
