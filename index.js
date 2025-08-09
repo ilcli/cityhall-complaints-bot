@@ -204,107 +204,6 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-/**
- * Process message in background (after webhook response)
- * This prevents webhook timeouts and allows for longer processing times
- */
-async function processMessageInBackground({ messageType, sender, timestampMs, messagePayload, messageId, source, startTime }) {
-  try {
-    console.log(`🔄 Background processing started for message ${messageId}`);
-    
-
-    // Format timestamp
-    const timestamp = DateTime.fromMillis(timestampMs)
-      .setZone('Asia/Jerusalem')
-      .toFormat('HH:mm dd-MM-yy');
-
-    // Extract message content with intelligent pairing
-    const messageContent = await processMessageWithContext(messageType, messagePayload, sender, timestampMs);
-    const { messageText, imageUrl, confidence } = messageContent;
-    
-    console.log(`📋 Message processing result: text="${messageText.substring(0, 100)}...", image=${!!imageUrl}, confidence=${confidence}`);
-
-    // Extract phone numbers and names from message text
-    const extractedInfo = extractContactInfo(messageText);
-    console.log(`📋 Extracted contact info:`, extractedInfo);
-
-    // AI analysis
-    console.log(`🤖 Analyzing complaint with message: "${messageText}" and imageUrl: "${imageUrl}"`);
-    const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
-    console.log(`🤖 AI analysis result:`, analysis);
-
-    // Prioritize extracted info over sender data and AI analysis
-    const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
-    const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
-
-    // Prepare row for Google Sheets
-    const row = {
-      'שם הפונה': sanitizeForSheets(finalName),
-      'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
-      'רמת דחיפות': sanitizeForSheets(analysis['רמת דחיפות'] || ''),
-      'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
-      'תאריך ושעה': timestamp,
-      'טלפון': finalPhone,
-      'קישור לתמונה': imageUrl || '',
-      'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
-      'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
-      'source': `${source}:${confidence}`,
-    };
-
-    // Log specific image URL status before sending to sheet
-    if (imageUrl) {
-      console.log(`🖼️ Image URL will be stored in sheet: ${imageUrl}`);
-    } else {
-      console.log(`⚠️ No image URL available for storage`);
-    }
-    
-    console.log(`📝 Row data to be sent to sheet:`, row);
-    
-    // Add performance stats for dashboard update
-    const successRate = performanceStats.totalProcessed > 0 
-      ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100)
-      : 0;
-    
-    row.performanceStats = {
-      totalProcessed: performanceStats.totalProcessed + 1, // +1 for current message
-      successRate,
-      avgResponseTime: performanceStats.avgResponseTime
-    };
-    
-    await appendToSheet(row);
-    console.log(`✅ Complaint from ${sender} logged with type: ${messageType} (source: ${source})`);
-    
-    // Track performance metrics
-    const processingTime = Date.now() - startTime;
-    performanceStats.totalProcessed++;
-    performanceStats.responseTimes.push(processingTime);
-    
-    // Keep only last 100 response times for average calculation
-    if (performanceStats.responseTimes.length > 100) {
-      performanceStats.responseTimes = performanceStats.responseTimes.slice(-100);
-    }
-    
-    performanceStats.avgResponseTime = Math.round(
-      performanceStats.responseTimes.reduce((a, b) => a + b, 0) / performanceStats.responseTimes.length
-    );
-    
-    performanceStats.successfulAnalyses++;
-    performanceStats.lastUpdated = new Date();
-    
-    console.log(`⚡ Background processing complete: ${processingTime}ms | Total processed: ${performanceStats.totalProcessed}`);
-    
-  } catch (error) {
-    console.error('❌ Background processing error:', error);
-    console.error('Stack:', error.stack);
-    
-    // Track failed analyses
-    performanceStats.failedAnalyses++;
-    performanceStats.totalProcessed++;
-    performanceStats.lastUpdated = new Date();
-    
-    // Don't throw error - just log it (background processing shouldn't crash the server)
-  }
-}
 
 // Helper function to parse webhook payload from different sources
 function parseWebhookPayload(body) {
@@ -700,6 +599,117 @@ app.get('/', (req, res) => {
     }
   });
 });
+
+/**
+ * Process message in background (after webhook response)
+ * This prevents webhook timeouts and allows for longer processing times
+ */
+async function processMessageInBackground({ messageType, sender, timestampMs, messagePayload, messageId, source, startTime }) {
+  try {
+    console.log(`🔄 Background processing started for message ${messageId}`);
+    
+    // Format timestamp
+    const timestamp = DateTime.fromMillis(timestampMs)
+      .setZone('Asia/Jerusalem')
+      .toFormat('HH:mm dd-MM-yy');
+
+    // Extract message content with intelligent pairing
+    const messageContent = await processMessageWithContext(messageType, messagePayload, sender, timestampMs);
+    const { messageText, imageUrl, confidence } = messageContent;
+    
+    console.log(`📋 Message processing result: text="${messageText ? messageText.substring(0, 100) : '(empty)'}...", image=${!!imageUrl}, confidence=${confidence}`);
+
+    // Extract phone numbers and names from message text
+    const extractedInfo = extractContactInfo(messageText);
+    console.log(`📋 Extracted contact info:`, extractedInfo);
+
+    // AI analysis
+    console.log(`🤖 Analyzing complaint with message: "${messageText}" and imageUrl: "${imageUrl}"`);
+    const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
+    console.log(`🤖 AI analysis result:`, analysis);
+
+    // Prioritize extracted info over sender data and AI analysis
+    const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
+    const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
+
+    // Prepare row for Google Sheets
+    const row = {
+      'שם הפונה': sanitizeForSheets(finalName),
+      'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
+      'רמת דחיפות': sanitizeForSheets(analysis['רמת דחיפות'] || ''),
+      'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
+      'תאריך ושעה': timestamp,
+      'טלפון': finalPhone,
+      'קישור לתמונה': imageUrl || '',
+      'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
+      'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
+      'source': `${source}:${confidence}`,
+    };
+
+    // Log specific image URL status before sending to sheet
+    if (imageUrl) {
+      console.log(`🖼️ Image URL will be stored in sheet: ${imageUrl}`);
+    } else {
+      console.log(`⚠️ No image URL available for storage`);
+    }
+    
+    console.log(`📝 Row data to be sent to sheet:`, row);
+    
+    // Add performance stats for dashboard update
+    const successRate = performanceStats.totalProcessed > 0 
+      ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100)
+      : 0;
+    
+    row.performanceStats = {
+      totalProcessed: performanceStats.totalProcessed + 1, // +1 for current message
+      successRate,
+      avgResponseTime: performanceStats.avgResponseTime
+    };
+    
+    await appendToSheet(row);
+    console.log(`✅ Complaint from ${sender} logged with type: ${messageType} (source: ${source})`);
+    
+    // Track performance metrics
+    const processingTime = Date.now() - startTime;
+    performanceStats.totalProcessed++;
+    
+    // Add new response time with memory protection
+    if (!Array.isArray(performanceStats.responseTimes)) {
+      performanceStats.responseTimes = [];
+    }
+    performanceStats.responseTimes.push(processingTime);
+    
+    // Keep only last 100 response times for average calculation (with failsafe)
+    try {
+      if (performanceStats.responseTimes.length > 100) {
+        performanceStats.responseTimes = performanceStats.responseTimes.slice(-100);
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to trim response times array, resetting:', e.message);
+      performanceStats.responseTimes = [processingTime];
+    }
+    
+    performanceStats.avgResponseTime = Math.round(
+      performanceStats.responseTimes.reduce((a, b) => a + b, 0) / performanceStats.responseTimes.length
+    );
+    
+    performanceStats.successfulAnalyses++;
+    performanceStats.lastUpdated = new Date();
+    
+    console.log(`⚡ Background processing complete: ${processingTime}ms | Total processed: ${performanceStats.totalProcessed}`);
+    
+  } catch (error) {
+    console.error('❌ Background processing error:', error);
+    console.error('Stack:', error.stack);
+    
+    // Track failed analyses
+    performanceStats.failedAnalyses++;
+    performanceStats.totalProcessed++;
+    performanceStats.lastUpdated = new Date();
+    
+    // Don't throw error - just log it (background processing shouldn't crash the server)
+  }
+}
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });

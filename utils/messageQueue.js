@@ -32,9 +32,12 @@ class MessageQueue {
 
     console.log(`📥 Message queued for background processing (queue size: ${this.queue.length})`);
     
-    // Start processing if not already running
+    // Start processing if not already running (with race condition protection)
     if (!this.processing) {
-      this.startProcessing();
+      // Set flag immediately to prevent race condition
+      this.processing = true;
+      // Start processing asynchronously
+      setImmediate(() => this.startProcessing());
     }
   }
 
@@ -42,9 +45,11 @@ class MessageQueue {
    * Start processing messages from the queue
    */
   async startProcessing() {
-    if (this.processing) return;
+    // Already set to true in enqueue, just verify
+    if (!this.processing) {
+      this.processing = true;
+    }
     
-    this.processing = true;
     console.log('🔄 Starting background message processing...');
 
     while (this.queue.length > 0) {
@@ -63,8 +68,12 @@ class MessageQueue {
         console.error('❌ Error in background processing:', error.message);
         console.error('Stack:', error.stack);
         
-        // Continue processing other messages even if one fails
-        // Don't re-queue failed messages to avoid infinite loops
+        // Log failed message details for debugging
+        console.error('Failed message ID:', item.messageData?.messageId);
+        console.error('Failed message type:', item.messageData?.messageType);
+        
+        // TODO: In production, consider sending to dead letter queue or alerting
+        // For now, continue processing other messages to avoid blocking
       }
       
       // Small delay between processing to avoid overwhelming the system
