@@ -933,6 +933,11 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Simple test endpoint
+app.get('/test', (req, res) => {
+  res.json({ message: 'Test endpoint working', timestamp: new Date() });
+});
+
 // Test endpoint to check Meta API token
 app.get('/admin/test-meta-token', async (req, res) => {
   try {
