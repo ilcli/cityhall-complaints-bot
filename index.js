@@ -245,6 +245,11 @@ function parseWebhookPayload(body) {
         const timestampMs = parseInt(message.timestamp) * 1000; // Convert from seconds to milliseconds
         const messageId = message.id;
         
+        // Debug: Log raw message structure for images
+        if (messageType === 'image') {
+          console.log(`🔍 Raw Meta image message structure:`, JSON.stringify(message, null, 2));
+        }
+        
         let messagePayload = {};
         
         if (messageType === 'text') {
