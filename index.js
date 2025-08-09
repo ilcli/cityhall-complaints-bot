@@ -263,17 +263,21 @@ function parseWebhookPayload(body) {
         if (messageType === 'text') {
           messagePayload.text = message.text?.body || '';
         } else if (messageType === 'image') {
-          messagePayload.caption = message.image?.caption || '';
-          messagePayload.url = message.image?.url || message.image?.link || ''; // Meta uses 'url' not 'link'
+          // Fix: Caption is at message level for Meta webhooks, not inside image object
+          messagePayload.caption = message.caption || '';
+          // Fix: Meta doesn't provide direct URL, only media ID for API retrieval
+          messagePayload.url = ''; // Meta doesn't provide direct URL in webhook
           messagePayload.id = message.image?.id || '';
           messagePayload.mimeType = message.image?.mime_type || '';
+          messagePayload.sha256 = message.image?.sha256 || '';
           
           // Log what we got from Meta webhook
           console.log(`📷 Meta image webhook data:`, {
             id: messagePayload.id,
             url: messagePayload.url,
             caption: messagePayload.caption,
-            mimeType: messagePayload.mimeType
+            mimeType: messagePayload.mimeType,
+            sha256: messagePayload.sha256
           });
         } else {
           console.log(`⚠️ Unsupported Meta message type: ${messageType}`);
@@ -758,7 +762,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     status: 'healthy',
-    version: 'debug-v3-meta-api',
+    version: 'debug-v4-meta-parsing',
     timestamp: new Date().toISOString()
   });
 });
