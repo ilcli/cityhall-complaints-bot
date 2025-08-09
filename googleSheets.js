@@ -80,7 +80,7 @@ export async function recreateDashboard() {
           }]
         }
       });
-      console.log('🗑️ Old Dashboard sheet deleted');
+      console.log('🗑️ לוח בקרה ישן נמחק');
     }
     
     // Create new Dashboard sheet
@@ -98,7 +98,7 @@ export async function recreateDashboard() {
       }
     });
     
-    console.log('✅ New Hebrew Dashboard sheet created');
+    console.log('✅ לוח בקרה חדש בעברית נוצר');
     
     // Set up dashboard structure
     await setupDashboardLayout(sheets);
@@ -107,7 +107,7 @@ export async function recreateDashboard() {
     await addDashboardFormatting(sheets);
     
   } catch (error) {
-    console.error('❌ Failed to recreate Dashboard sheet:', error.message);
+    console.error('❌ יצירת מחדש של לוח הבקרה נכשלה:', error.message);
     throw error;
   }
 }
@@ -146,7 +146,7 @@ export async function initializeDashboardSheet() {
         }
       });
       
-      console.log('✅ Dashboard sheet created');
+      console.log('✅ לוח בקרה נוצר');
     }
     
     // Set up dashboard structure
@@ -156,7 +156,7 @@ export async function initializeDashboardSheet() {
     await addDashboardFormatting(sheets);
     
   } catch (error) {
-    console.error('❌ Failed to initialize Dashboard sheet:', error.message);
+    console.error('❌ אתחול לוח הבקרה נכשל:', error.message);
     throw error;
   }
 }
@@ -198,7 +198,7 @@ async function setupDashboardLayout(sheets) {
     }
   });
   
-  console.log('✅ Dashboard layout configured with formulas');
+  console.log('✅ פריסת לוח הבקרה הוגדרה עם נוסחאות');
 }
 
 /**
@@ -308,9 +308,9 @@ async function addDashboardFormatting(sheets) {
       }
     });
     
-    console.log('🎨 Dashboard formatting applied');
+    console.log('🎨 עיצוב לוח הבקרה הוחל');
   } catch (error) {
-    console.warn('⚠️ Dashboard formatting failed:', error.message);
+    console.warn('⚠️ עיצוב לוח הבקרה נכשל:', error.message);
   }
 }
 
@@ -355,9 +355,9 @@ export async function updateDashboardStats(stats = {}) {
       }
     });
     
-    console.log('📊 Dashboard stats updated');
+    console.log('📊 סטטיסטיקות לוח הבקרה עודכנו');
   } catch (error) {
-    console.error('❌ Failed to update dashboard stats:', error.message);
+    console.error('❌ עדכון סטטיסטיקות לוח הבקרה נכשל:', error.message);
     // Don't throw - dashboard updates should not break main flow
   }
 }
@@ -403,7 +403,7 @@ export async function appendToSheet(row) {
     // Update dashboard after each complaint (async, don't block main flow)
     setTimeout(() => {
       updateDashboardStats(row.performanceStats).catch(err => 
-        console.warn('⚠️ Dashboard update failed:', err.message)
+        console.warn('⚠️ עדכון לוח הבקרה נכשל:', err.message)
       );
     }, 1000);
     

@@ -608,13 +608,13 @@ function startPeriodicDashboardUpdates() {
       };
       
       await updateDashboardStats(stats);
-      console.log(`📊 Dashboard updated automatically - ${stats.totalProcessed} processed, ${stats.successRate}% success`);
+      console.log(`📊 לוח בקרה עודכן אוטומטית - ${stats.totalProcessed} נעבדו, ${stats.successRate}% הצלחה`);
     } catch (error) {
-      console.warn('⚠️ Periodic dashboard update failed:', error.message);
+      console.warn('⚠️ עדכון לוח בקרה תקופתי נכשל:', error.message);
     }
   }, 5 * 60 * 1000); // 5 minutes
   
-  console.log('⏰ Periodic dashboard updates started (every 5 minutes)');
+  console.log('⏰ עדכוני לוח בקרה תקופתיים הופעלו (כל 5 דקות)');
 }
 
 // Add error handler middleware (must be last)
@@ -649,7 +649,7 @@ app.get('/', (req, res) => {
       contactExtraction: 'Extracts Hebrew/English contact info from messages',
       aiAnalysis: 'OpenRouter API with retry logic and fallback',
       dualWebhooks: 'Supports both Meta WhatsApp and Gupshup',
-      dashboard: 'Real-time metrics in Google Sheets Dashboard'
+      dashboard: 'מדדים בזמן אמת בלוח בקרה גוגל שיטס'
     }
   });
 });
@@ -661,15 +661,15 @@ app.get('/health', (req, res) => {
 // Special endpoint to recreate dashboard in Hebrew
 app.post('/admin/recreate-dashboard', async (req, res) => {
   try {
-    console.log('🔄 Recreating dashboard in Hebrew...');
+    console.log('🔄 יוצר מחדש לוח בקרה בעברית...');
     await recreateDashboard();
     res.json({ 
       status: 'success', 
-      message: 'Dashboard recreated in Hebrew',
+      message: 'לוח בקרה נוצר מחדש בעברית',
       dashboardUrl: `https://docs.google.com/spreadsheets/d/${process.env.SHEET_ID}/edit#gid=0`
     });
   } catch (error) {
-    console.error('❌ Dashboard recreation failed:', error.message);
+    console.error('❌ יצירת מחדש של לוח הבקרה נכשלה:', error.message);
     res.status(500).json({ 
       status: 'error', 
       message: error.message 
@@ -686,12 +686,12 @@ app.listen(PORT, async () => {
   // Initialize dashboard on startup
   try {
     await initializeDashboardSheet();
-    console.log(`📊 Dashboard initialized successfully`);
+    console.log(`📊 לוח הבקרה אותחל בהצלחה`);
     
     // Start periodic dashboard updates every 5 minutes
     startPeriodicDashboardUpdates();
   } catch (error) {
-    console.warn(`⚠️ Dashboard initialization failed:`, error.message);
+    console.warn(`⚠️ אתחול לוח הבקרה נכשל:`, error.message);
   }
 });
 
