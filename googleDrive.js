@@ -12,7 +12,9 @@ const SCOPES = [
 const credsPath = './creds/service-account.json';
 let auth = null;
 let driveService = null;
-let imagesFolderId = null;
+
+// Shared folder ID provided by user - resolves service account storage quota issue
+const SHARED_FOLDER_ID = '1pj0xHUKVFxMaYz3Eww3PXwCajq_3nGTN';
 
 /**
  * Initialize Google Drive auth (reuses same service account as Sheets)
@@ -35,54 +37,30 @@ function initializeDriveAuth() {
 }
 
 /**
- * Get or create the Images folder in Google Drive
+ * Verify access to the shared folder and return folder ID
  */
-async function getOrCreateImagesFolder() {
-  if (imagesFolderId) return imagesFolderId;
-  
+async function verifySharedFolderAccess() {
   try {
     initializeDriveAuth();
     
-    // Search for existing Images folder
-    const searchResponse = await driveService.files.list({
-      q: "name='Images' and mimeType='application/vnd.google-apps.folder' and trashed=false",
-      spaces: 'drive',
-      fields: 'files(id, name)',
+    // Verify we can access the shared folder
+    const folderInfo = await driveService.files.get({
+      fileId: SHARED_FOLDER_ID,
+      fields: 'id, name, mimeType, permissions',
     });
     
-    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-      imagesFolderId = searchResponse.data.files[0].id;
-      console.log(`📁 Using existing Images folder: ${imagesFolderId}`);
-      return imagesFolderId;
-    }
-    
-    // Create new Images folder if it doesn't exist
-    const fileMetadata = {
-      name: 'Images',
-      mimeType: 'application/vnd.google-apps.folder',
-    };
-    
-    const folder = await driveService.files.create({
-      resource: fileMetadata,
-      fields: 'id',
-    });
-    
-    imagesFolderId = folder.data.id;
-    console.log(`📁 Created new Images folder: ${imagesFolderId}`);
-    
-    // Make folder accessible to anyone with link
-    await driveService.permissions.create({
-      fileId: imagesFolderId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
-    
-    return imagesFolderId;
+    console.log(`📁 Verified access to shared folder: ${folderInfo.data.name} (${SHARED_FOLDER_ID})`);
+    return SHARED_FOLDER_ID;
   } catch (error) {
-    console.error('❌ Failed to get/create Images folder:', error.message);
-    throw error;
+    console.error('❌ Failed to access shared folder:', error.message);
+    
+    if (error.code === 404) {
+      throw new Error(`Shared folder ${SHARED_FOLDER_ID} not found. Please verify the folder ID and ensure the service account has access.`);
+    } else if (error.code === 403) {
+      throw new Error(`Access denied to shared folder ${SHARED_FOLDER_ID}. Please share the folder with the service account email.`);
+    } else {
+      throw new Error(`Failed to access shared folder: ${error.message}`);
+    }
   }
 }
 
@@ -124,8 +102,8 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
   try {
     initializeDriveAuth();
     
-    // Get or create Images folder
-    const folderId = await getOrCreateImagesFolder();
+    // Verify access to shared folder
+    const folderId = await verifySharedFolderAccess();
     
     // Download the image from WhatsApp
     const { buffer, contentType } = await downloadImage(imageUrl);
@@ -147,7 +125,7 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
       body: Readable.from(buffer),
     };
     
-    console.log(`📤 Uploading image to Drive: ${filename}`);
+    console.log(`📤 Uploading image to shared Drive folder: ${filename}`);
     
     const file = await driveService.files.create({
       resource: fileMetadata,
@@ -155,14 +133,20 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
       fields: 'id, webViewLink, webContentLink',
     });
     
-    // Make file accessible to anyone with link
-    await driveService.permissions.create({
-      fileId: file.data.id,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
+    // Make file accessible to anyone with link (with proper error handling for shared folders)
+    try {
+      await driveService.permissions.create({
+        fileId: file.data.id,
+        requestBody: {
+          role: 'reader',
+          type: 'anyone',
+        },
+      });
+      console.log(`🔗 File permissions set for public access`);
+    } catch (permissionError) {
+      console.warn(`⚠️ Could not set public permissions (shared folder may have restrictions): ${permissionError.message}`);
+      console.log(`📝 File uploaded successfully but permissions may be inherited from shared folder`);
+    }
     
     // Get shareable link
     const shareableLink = `https://drive.google.com/file/d/${file.data.id}/view?usp=sharing`;
@@ -177,6 +161,17 @@ export async function uploadImageToDrive(imageUrl, metadata = {}) {
     };
   } catch (error) {
     console.error('❌ Failed to upload image to Drive:', error.message);
+    
+    // Provide specific error messages for common shared folder issues
+    if (error.message.includes('shared folder')) {
+      console.error('   Please ensure the service account has been granted access to the shared folder.');
+      console.error('   Share the folder with the service account email from your Google Cloud credentials.');
+    } else if (error.code === 403) {
+      console.error('   Access denied. Check that the service account has proper permissions.');
+    } else if (error.code === 404) {
+      console.error('   Shared folder not found. Verify the folder ID is correct.');
+    }
+    
     // Return null instead of throwing to not break the flow
     return null;
   }
