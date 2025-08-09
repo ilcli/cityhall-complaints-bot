@@ -10,7 +10,7 @@ import { DateTime } from 'luxon';
 import fetch from 'node-fetch';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet, initializeDashboardSheet, updateDashboardStats, recreateDashboard } from './googleSheets.js';
-import { uploadImageToDrive } from './googleDrive.js';
+// import { uploadImageToDrive } from './googleDrive.js'; // Replaced with Base64 storage
 import { webhookAuthMiddleware, captureRawBody } from './middleware/security.js';
 import { rateLimitMiddleware } from './middleware/rateLimiter.js';
 import { validateWebhookPayload, generateMessageId, sanitizeText, sanitizeForSheets } from './utils/validation.js';
@@ -33,6 +33,61 @@ let performanceStats = {
  * @param {string} mediaId - Media ID from WhatsApp
  * @returns {string|null} - Media URL or null if failed
  */
+/**
+ * Converts image from Meta URL to Base64 for direct storage in Google Sheets
+ * @param {string} imageUrl - Image URL from Meta API
+ * @returns {string|null} - Base64 encoded image or null if failed
+ */
+async function convertImageToBase64(imageUrl) {
+  if (!imageUrl) {
+    console.warn('⚠️ No image URL provided for Base64 conversion');
+    return null;
+  }
+  
+  try {
+    const accessToken = process.env.META_ACCESS_TOKEN;
+    const headers = {};
+    
+    // Add authorization if we have a Meta access token
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`;
+    }
+    
+    console.log(`📥 Downloading image for Base64 conversion: ${imageUrl}`);
+    const response = await fetch(imageUrl, { 
+      headers,
+      timeout: 15000 // 15 second timeout
+    });
+    
+    if (!response.ok) {
+      console.error(`❌ Failed to download image: ${response.status} ${response.statusText}`);
+      return null;
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    
+    // Check size limits for Google Sheets (max ~50KB for cell content)
+    const maxSize = 50 * 1024; // 50KB limit
+    if (buffer.length > maxSize) {
+      console.warn(`⚠️ Image too large for Base64 storage: ${buffer.length} bytes > ${maxSize} bytes`);
+      console.warn(`   Will store image URL instead of Base64 data`);
+      return null;
+    }
+    
+    const base64String = buffer.toString('base64');
+    const dataUri = `data:${contentType};base64,${base64String}`;
+    
+    console.log(`✅ Image converted to Base64 (${buffer.length} bytes, type: ${contentType})`);
+    return dataUri;
+    
+  } catch (error) {
+    console.error('❌ Failed to convert image to Base64:', error.message);
+    return null;
+  }
+}
+
 async function getMediaUrlFromMeta(mediaId) {
   console.log(`🔍 getMediaUrlFromMeta called with mediaId: "${mediaId}"`);
   
@@ -733,22 +788,19 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
     console.log(`🤖 AI analysis result:`, analysis);
 
-    // Upload image to Google Drive if present
-    let driveImageUrl = null;
+    // Convert image to Base64 for direct storage in Google Sheets
+    let base64Image = null;
+    let imageUrlForStorage = null;
     if (imageUrl) {
-      console.log(`🖼️ Processing image upload to Google Drive...`);
-      const driveResult = await uploadImageToDrive(imageUrl, {
-        sender,
-        timestamp,
-        messageId
-      });
+      console.log(`🖼️ Processing image conversion to Base64...`);
+      base64Image = await convertImageToBase64(imageUrl);
       
-      if (driveResult) {
-        driveImageUrl = driveResult.shareableLink;
-        console.log(`✅ Image uploaded to Drive: ${driveImageUrl}`);
+      if (base64Image) {
+        console.log(`✅ Image converted to Base64 for inline storage`);
+        imageUrlForStorage = imageUrl; // Keep original URL as backup
       } else {
-        console.warn(`⚠️ Could not upload image to Drive, using original URL`);
-        driveImageUrl = imageUrl; // Fallback to original URL
+        console.warn(`⚠️ Could not convert image to Base64, storing URL only`);
+        imageUrlForStorage = imageUrl; // Store original URL
       }
     }
 
@@ -756,7 +808,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
     const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
 
-    // Prepare row for Google Sheets
+    // Prepare row for Google Sheets with Base64 image data
     const row = {
       'שם הפונה': sanitizeForSheets(finalName),
       'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
@@ -764,17 +816,20 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
       'טלפון': finalPhone,
-      'קישור לתמונה': driveImageUrl || '',
+      'קישור לתמונה': imageUrlForStorage || '',
+      'תמונה': base64Image || '', // Base64 image data for inline display
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
       'source': `${source}:${confidence}`,
     };
 
-    // Log specific image URL status before sending to sheet
-    if (driveImageUrl) {
-      console.log(`🖼️ Google Drive image URL will be stored in sheet: ${driveImageUrl}`);
+    // Log specific image storage status before sending to sheet
+    if (base64Image) {
+      console.log(`🖼️ Base64 image data will be stored inline in sheet (${base64Image.length} chars)`);
+    } else if (imageUrlForStorage) {
+      console.log(`🖼️ Image URL will be stored in sheet: ${imageUrlForStorage}`);
     } else {
-      console.log(`⚠️ No image URL available for storage`);
+      console.log(`⚠️ No image data available for storage`);
     }
     
     console.log(`📝 Row data to be sent to sheet:`, row);

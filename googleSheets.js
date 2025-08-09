@@ -391,13 +391,14 @@ async function ensureComplaintsSheet(sheets) {
         }
       });
       
-      // Add headers to the new sheet
+      // Add headers to the new sheet with Base64 image column
       const headers = [[
         'תאריך ושעה',
         'תוכן הפנייה', 
         'שם הפונה',
         'טלפון',
         'קישור לתמונה',
+        'תמונה',
         'קטגוריה',
         'רמת דחיפות',
         'סוג הפנייה',
@@ -407,7 +408,7 @@ async function ensureComplaintsSheet(sheets) {
       
       await sheets.spreadsheets.values.update({
         spreadsheetId: process.env.SHEET_ID,
-        range: 'Complaints!A1:J1',
+        range: 'Complaints!A1:K1',
         valueInputOption: 'RAW',
         resource: { values: headers }
       });
@@ -442,6 +443,7 @@ export async function appendToSheet(row) {
       row['שם הפונה'] || '',
       row['טלפון'] || '',
       row['קישור לתמונה'] || '',
+      row['תמונה'] || '', // Base64 image data
       row['קטגוריה'] || '',
       row['רמת דחיפות'] || '',
       row['סוג הפנייה'] || '',
@@ -453,8 +455,8 @@ export async function appendToSheet(row) {
 
     const response = await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.SHEET_ID,
-      range: 'Complaints!A:J',
-      valueInputOption: 'USER_ENTERED', // Safer than RAW for user input
+      range: 'Complaints!A:K', // Updated range to include new column
+      valueInputOption: 'USER_ENTERED', // Allows IMAGE() formulas to work
       insertDataOption: 'INSERT_ROWS',
       resource: { values },
     });
