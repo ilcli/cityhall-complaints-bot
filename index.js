@@ -14,6 +14,7 @@ import { webhookAuthMiddleware, captureRawBody } from './middleware/security.js'
 import { rateLimitMiddleware } from './middleware/rateLimiter.js';
 import { validateWebhookPayload, generateMessageId, sanitizeText, sanitizeForSheets } from './utils/validation.js';
 import messageStore from './utils/messageStore.js';
+import messageQueue from './utils/messageQueue.js';
 import { errorHandler, asyncHandler, ValidationError, ConfigurationError } from './utils/errors.js';
 
 // Bot performance tracking
@@ -177,6 +178,40 @@ app.post('/webhook', async (req, res) => {
       return res.status(200).send('Duplicate');
     }
     messageStore.markProcessed(messageId);
+    
+    // IMPORTANT: Respond immediately to prevent webhook timeout
+    res.status(200).json({ 
+      status: 'accepted', 
+      messageId,
+      message: 'Message queued for processing'
+    });
+    
+    // Queue message for background processing
+    await messageQueue.enqueue(
+      { messageType, sender, timestampMs, messagePayload, messageId, source, startTime },
+      processMessageInBackground
+    );
+    
+  } catch (error) {
+    console.error('❌ Webhook error:', error);
+    
+    // Track failed analyses
+    performanceStats.failedAnalyses++;
+    performanceStats.totalProcessed++;
+    performanceStats.lastUpdated = new Date();
+    
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * Process message in background (after webhook response)
+ * This prevents webhook timeouts and allows for longer processing times
+ */
+async function processMessageInBackground({ messageType, sender, timestampMs, messagePayload, messageId, source, startTime }) {
+  try {
+    console.log(`🔄 Background processing started for message ${messageId}`);
+    
 
     // Format timestamp
     const timestamp = DateTime.fromMillis(timestampMs)
@@ -256,25 +291,20 @@ app.post('/webhook', async (req, res) => {
     performanceStats.successfulAnalyses++;
     performanceStats.lastUpdated = new Date();
     
-    console.log(`⚡ Processing time: ${processingTime}ms | Total processed: ${performanceStats.totalProcessed}`);
+    console.log(`⚡ Background processing complete: ${processingTime}ms | Total processed: ${performanceStats.totalProcessed}`);
     
-    return res.status(200).json({ 
-      status: 'success', 
-      messageId,
-      processingTime: `${processingTime}ms`
-    });
-
   } catch (error) {
-    console.error('❌ Webhook error:', error);
+    console.error('❌ Background processing error:', error);
+    console.error('Stack:', error.stack);
     
     // Track failed analyses
     performanceStats.failedAnalyses++;
     performanceStats.totalProcessed++;
     performanceStats.lastUpdated = new Date();
     
-    return res.status(500).json({ error: 'Internal server error' });
+    // Don't throw error - just log it (background processing shouldn't crash the server)
   }
-});
+}
 
 // Helper function to parse webhook payload from different sources
 function parseWebhookPayload(body) {
@@ -715,7 +745,35 @@ app.post('/admin/clear-store', (req, res) => {
   }
 });
 
-app.listen(PORT, async () => {
+// Admin endpoint to check message queue status
+app.get('/admin/queue-status', (req, res) => {
+  try {
+    const queueStats = messageQueue.getStats();
+    const messageStats = messageStore.getStats();
+    
+    res.json({
+      status: 'success',
+      queue: queueStats,
+      messageStore: messageStats,
+      performance: {
+        totalProcessed: performanceStats.totalProcessed,
+        successRate: performanceStats.totalProcessed > 0 
+          ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100) + '%'
+          : '0%',
+        avgResponseTime: performanceStats.avgResponseTime + 'ms',
+        lastUpdated: performanceStats.lastUpdated
+      }
+    });
+  } catch (error) {
+    console.error('❌ Failed to get queue status:', error.message);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
+  }
+});
+
+const server = app.listen(PORT, async () => {
   console.log(`🚀 Server live on port ${PORT}`);
   console.log(`🔒 Webhook auth: ${process.env.WEBHOOK_SECRET ? 'enabled' : 'disabled'}`);
   console.log(`⏱️ Rate limiting: ${process.env.RATE_LIMIT_MAX_REQUESTS || 10} requests per ${(process.env.RATE_LIMIT_WINDOW_MS || 60000) / 1000}s`);
@@ -733,9 +791,54 @@ app.listen(PORT, async () => {
   }
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully...');
-  messageStore.stopCleanup();
-  process.exit(0);
-});
+// Graceful shutdown handling
+let isShuttingDown = false;
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  console.log(`\n⚠️ ${signal} received, starting graceful shutdown...`);
+  
+  // Stop accepting new connections
+  server.close(() => {
+    console.log('🛑 HTTP server closed');
+  });
+  
+  // Wait for message queue to finish processing
+  const queueStats = messageQueue.getStats();
+  if (queueStats.queueLength > 0) {
+    console.log(`⏳ Waiting for ${queueStats.queueLength} messages to finish processing...`);
+    
+    // Give queue max 30 seconds to finish
+    const maxWaitTime = 30000;
+    const startTime = Date.now();
+    
+    const waitInterval = setInterval(() => {
+      const currentStats = messageQueue.getStats();
+      if (currentStats.queueLength === 0 || Date.now() - startTime > maxWaitTime) {
+        clearInterval(waitInterval);
+        
+        if (currentStats.queueLength > 0) {
+          console.warn(`⚠️ Shutdown timeout - ${currentStats.queueLength} messages still in queue`);
+        } else {
+          console.log('✅ All queued messages processed');
+        }
+        
+        // Clean shutdown
+        messageStore.stopCleanup();
+        console.log('👋 Server shutdown complete');
+        process.exit(0);
+      }
+    }, 500);
+  } else {
+    // Clean shutdown
+    messageStore.stopCleanup();
+    console.log('👋 Server shutdown complete');
+    process.exit(0);
+  }
+}
+

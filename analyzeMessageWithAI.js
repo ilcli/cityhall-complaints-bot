@@ -38,7 +38,7 @@ export async function analyzeComplaint({ message, timestamp, imageUrl }, retryCo
   `;
 
   const maxRetries = 3;
-  const timeout = 30000 + (retryCount * 10000); // Increase timeout on retries
+  const timeout = 15000 + (retryCount * 5000); // Start with 15s, increase by 5s per retry (max 30s)
   
   try {
     console.log(`🤖 Making request to OpenRouter API... (attempt ${retryCount + 1}/${maxRetries + 1})`);
