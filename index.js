@@ -7,13 +7,80 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import { DateTime } from 'luxon';
 
+import fetch from 'node-fetch';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
-import { appendToSheet } from './googleSheets.js';
+import { appendToSheet, initializeDashboardSheet, updateDashboardStats, recreateDashboard } from './googleSheets.js';
 import { webhookAuthMiddleware, captureRawBody } from './middleware/security.js';
 import { rateLimitMiddleware } from './middleware/rateLimiter.js';
 import { validateWebhookPayload, generateMessageId, sanitizeText, sanitizeForSheets } from './utils/validation.js';
 import messageStore from './utils/messageStore.js';
 import { errorHandler, asyncHandler, ValidationError, ConfigurationError } from './utils/errors.js';
+
+// Bot performance tracking
+let performanceStats = {
+  totalProcessed: 0,
+  successfulAnalyses: 0,
+  failedAnalyses: 0,
+  avgResponseTime: 0,
+  responseTimes: [],
+  lastUpdated: new Date()
+};
+
+/**
+ * Retrieves media URL from Meta WhatsApp Business API
+ * @param {string} mediaId - Media ID from WhatsApp
+ * @returns {string|null} - Media URL or null if failed
+ */
+async function getMediaUrlFromMeta(mediaId) {
+  if (!mediaId) return null;
+  
+  const accessToken = process.env.META_ACCESS_TOKEN;
+  if (!accessToken) {
+    console.warn('⚠️ META_ACCESS_TOKEN not configured, cannot retrieve media URLs');
+    return null;
+  }
+  
+  try {
+    console.log(`🔍 Retrieving media URL for ID: ${mediaId}`);
+    
+    // First, get media info
+    const mediaInfoResponse = await fetch(`https://graph.facebook.com/v18.0/${mediaId}`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (!mediaInfoResponse.ok) {
+      console.error(`❌ Meta Media API error: ${mediaInfoResponse.status}`);
+      return null;
+    }
+    
+    const mediaInfo = await mediaInfoResponse.json();
+    console.log(`📄 Media info:`, mediaInfo);
+    
+    // Get the actual media content URL
+    const mediaResponse = await fetch(mediaInfo.url, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    
+    if (!mediaResponse.ok) {
+      console.error(`❌ Meta Media download error: ${mediaResponse.status}`);
+      return null;
+    }
+    
+    // The media URL from the response
+    const mediaUrl = mediaInfo.url;
+    console.log(`✅ Retrieved media URL: ${mediaUrl}`);
+    
+    return mediaUrl;
+    
+  } catch (error) {
+    console.error('❌ Failed to retrieve media URL:', error.message);
+    return null;
+  }
+}
 
 // Validate required environment variables at startup
 function validateEnvironment() {
@@ -27,6 +94,10 @@ function validateEnvironment() {
   // Warn about optional but recommended variables
   if (!process.env.WEBHOOK_SECRET) {
     console.warn('⚠️ WEBHOOK_SECRET not configured - webhook authentication disabled');
+  }
+  
+  if (!process.env.META_ACCESS_TOKEN) {
+    console.warn('⚠️ META_ACCESS_TOKEN not configured - WhatsApp media URLs cannot be retrieved');
   }
 }
 
@@ -60,6 +131,8 @@ if (process.env.WEBHOOK_SECRET) {
 app.use('/webhook', rateLimitMiddleware);
 
 app.post('/webhook', async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     // Log the raw body first in case JSON parsing fails
     console.log('📨 Raw webhook body type:', typeof req.body);
@@ -111,37 +184,11 @@ app.post('/webhook', async (req, res) => {
       .setZone('Asia/Jerusalem')
       .toFormat('HH:mm dd-MM-yy');
 
-    // Extract message content based on type
-    let messageText = '';
-    let imageUrl = null;
-
-    if (messageType === 'text') {
-      messageText = sanitizeText(messagePayload.text || messagePayload || '');
-      messageStore.storeMessage(sender, messageText, timestampMs);
-      console.log(`📝 Text message from ${sender}: "${messageText}"`);
-
-    } else if (messageType === 'image') {
-      const caption = messagePayload.caption || '';
-      imageUrl = messagePayload.url || messagePayload.link || '';
-      
-      console.log(`📸 Processing image from ${sender}:`);
-      console.log(`   Caption: "${caption}"`);
-      console.log(`   Image URL: ${imageUrl}`);
-
-      if (caption) {
-        messageText = caption;
-        console.log(`   Using caption as message text`);
-      } else {
-        const recentMessage = messageStore.getRecentMessage(sender, timestampMs);
-        if (recentMessage) {
-          messageText = recentMessage;
-          console.log(`   Paired with recent message: "${messageText}"`);
-        } else {
-          messageText = '(תמונה ללא טקסט, לא ניתן לקשר לפנייה)';
-          console.log(`   No recent messages found, using fallback`);
-        }
-      }
-    }
+    // Extract message content with intelligent pairing
+    const messageContent = await processMessageWithContext(messageType, messagePayload, sender, timestampMs);
+    const { messageText, imageUrl, confidence } = messageContent;
+    
+    console.log(`📋 Message processing result: text="${messageText.substring(0, 100)}...", image=${!!imageUrl}, confidence=${confidence}`);
 
     // Extract phone numbers and names from message text
     const extractedInfo = extractContactInfo(messageText);
@@ -167,16 +214,58 @@ app.post('/webhook', async (req, res) => {
       'קישור לתמונה': imageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
-      'source': source,
+      'source': `${source}:${confidence}`,
     };
 
     console.log(`📝 Row data to be sent to sheet:`, row);
+    
+    // Add performance stats for dashboard update
+    const successRate = performanceStats.totalProcessed > 0 
+      ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100)
+      : 0;
+    
+    row.performanceStats = {
+      totalProcessed: performanceStats.totalProcessed + 1, // +1 for current message
+      successRate,
+      avgResponseTime: performanceStats.avgResponseTime
+    };
+    
     await appendToSheet(row);
     console.log(`✅ Complaint from ${sender} logged with type: ${messageType} (source: ${source})`);
-    return res.status(200).json({ status: 'success', messageId });
+    
+    // Track performance metrics
+    const processingTime = Date.now() - startTime;
+    performanceStats.totalProcessed++;
+    performanceStats.responseTimes.push(processingTime);
+    
+    // Keep only last 100 response times for average calculation
+    if (performanceStats.responseTimes.length > 100) {
+      performanceStats.responseTimes = performanceStats.responseTimes.slice(-100);
+    }
+    
+    performanceStats.avgResponseTime = Math.round(
+      performanceStats.responseTimes.reduce((a, b) => a + b, 0) / performanceStats.responseTimes.length
+    );
+    
+    performanceStats.successfulAnalyses++;
+    performanceStats.lastUpdated = new Date();
+    
+    console.log(`⚡ Processing time: ${processingTime}ms | Total processed: ${performanceStats.totalProcessed}`);
+    
+    return res.status(200).json({ 
+      status: 'success', 
+      messageId,
+      processingTime: `${processingTime}ms`
+    });
 
   } catch (error) {
     console.error('❌ Webhook error:', error);
+    
+    // Track failed analyses
+    performanceStats.failedAnalyses++;
+    performanceStats.totalProcessed++;
+    performanceStats.lastUpdated = new Date();
+    
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -228,6 +317,7 @@ function parseWebhookPayload(body) {
           messagePayload.caption = message.image?.caption || '';
           messagePayload.url = message.image?.link || '';
           messagePayload.id = message.image?.id || '';
+          messagePayload.mimeType = message.image?.mime_type || '';
         } else {
           console.log(`⚠️ Unsupported Meta message type: ${messageType}`);
           return { messageData: null, source: 'whatsapp' };
@@ -284,6 +374,100 @@ function parseWebhookPayload(body) {
   
   console.log('⚠️ Unknown webhook format, ignoring');
   return { messageData: null, source: 'unknown' };
+}
+
+// Intelligent message processing with context awareness
+async function processMessageWithContext(messageType, messagePayload, sender, timestampMs) {
+  let messageText = '';
+  let imageUrl = null;
+  let confidence = 'high';
+
+  if (messageType === 'text') {
+    messageText = sanitizeText(messagePayload.text || messagePayload || '');
+    messageStore.storeMessage(sender, messageText, timestampMs);
+    console.log(`📝 Text message from ${sender}: "${messageText.substring(0, 50)}..."`);
+    
+    // Check if there's a recent image that might be related
+    const recentImage = messageStore.getRecentImage(sender, timestampMs);
+    if (recentImage && isContentRelated(messageText, recentImage.caption)) {
+      imageUrl = recentImage.url;
+      confidence = 'paired_text_image';
+      console.log(`🔗 Paired text with recent image: ${imageUrl}`);
+    }
+
+  } else if (messageType === 'image') {
+    const caption = messagePayload.caption || '';
+    let tempImageUrl = messagePayload.url || messagePayload.link || '';
+    
+    console.log(`📸 Processing image from ${sender}:`);
+    console.log(`   Caption: "${caption}"`);
+    console.log(`   Initial Image URL: ${tempImageUrl}`);
+    console.log(`   Image ID: ${messagePayload.id}`);
+    
+    // If we don't have a direct URL but have an ID, try to get it from Meta API
+    if (!tempImageUrl && messagePayload.id) {
+      console.log(`🔄 No direct URL found, attempting to retrieve from Meta API...`);
+      tempImageUrl = await getMediaUrlFromMeta(messagePayload.id);
+    }
+    
+    imageUrl = tempImageUrl;
+    console.log(`📷 Final Image URL: ${imageUrl}`);
+
+    // Store this image for potential future pairing
+    messageStore.storeImage(sender, imageUrl, caption, timestampMs);
+
+    if (caption && caption.trim().length > 0) {
+      messageText = caption;
+      confidence = 'image_with_caption';
+      console.log(`   Using caption as message text`);
+    } else {
+      // Look for recent text messages that might be related
+      const recentMessage = messageStore.getRecentMessage(sender, timestampMs);
+      if (recentMessage) {
+        messageText = recentMessage.text;
+        confidence = 'paired_image_text';
+        console.log(`   Paired with recent message: "${messageText.substring(0, 50)}..."`);
+      } else {
+        messageText = '(תמונה ללא טקסט, לא ניתן לקשר לפנייה)';
+        confidence = 'image_only';
+        console.log(`   No recent messages found, using fallback`);
+      }
+    }
+  }
+
+  return { messageText, imageUrl, confidence };
+}
+
+// Check if text content and image caption are related
+function isContentRelated(text1, text2) {
+  if (!text1 || !text2) return false;
+  
+  // Convert to lowercase Hebrew/English for comparison
+  const t1 = text1.toLowerCase();
+  const t2 = text2.toLowerCase();
+  
+  // Check for common complaint keywords in Hebrew and English
+  const complaintKeywords = [
+    'בעיה', 'תקלה', 'בור', 'שבר', 'מקולקל', 'לא עובד', 'סכנה', 'מסוכן',
+    'problem', 'issue', 'broken', 'damage', 'dangerous', 'not working',
+    'רחוב', 'מדרכה', 'חניה', 'תאורה', 'עץ', 'אשפה', 'פח',
+    'street', 'sidewalk', 'parking', 'light', 'tree', 'trash', 'garbage'
+  ];
+  
+  // Check if both contain complaint-related keywords
+  const t1HasKeywords = complaintKeywords.some(keyword => t1.includes(keyword));
+  const t2HasKeywords = complaintKeywords.some(keyword => t2.includes(keyword));
+  
+  if (t1HasKeywords && t2HasKeywords) {
+    return true;
+  }
+  
+  // Check for shared significant words (3+ characters, Hebrew or English)
+  const words1 = t1.match(/[\u0590-\u05FF]{3,}|[a-z]{3,}/g) || [];
+  const words2 = t2.match(/[\u0590-\u05FF]{3,}|[a-z]{3,}/g) || [];
+  
+  const commonWords = words1.filter(word => words2.includes(word));
+  return commonWords.length >= 2; // At least 2 common significant words
 }
 
 // Helper function to extract contact info from message text
@@ -406,18 +590,66 @@ app.get('/webhook', (req, res) => {
   });
 });
 
+/**
+ * Starts periodic dashboard updates
+ */
+function startPeriodicDashboardUpdates() {
+  // Update dashboard stats every 5 minutes
+  setInterval(async () => {
+    try {
+      const successRate = performanceStats.totalProcessed > 0 
+        ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100)
+        : 0;
+        
+      const stats = {
+        totalProcessed: performanceStats.totalProcessed,
+        successRate,
+        avgResponseTime: performanceStats.avgResponseTime
+      };
+      
+      await updateDashboardStats(stats);
+      console.log(`📊 Dashboard updated automatically - ${stats.totalProcessed} processed, ${stats.successRate}% success`);
+    } catch (error) {
+      console.warn('⚠️ Periodic dashboard update failed:', error.message);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+  
+  console.log('⏰ Periodic dashboard updates started (every 5 minutes)');
+}
+
 // Add error handler middleware (must be last)
 app.use(errorHandler);
 
 app.get('/', (req, res) => {
-  const stats = messageStore.getStats();
+  const messageStats = messageStore.getStats();
+  const successRate = performanceStats.totalProcessed > 0 
+    ? Math.round((performanceStats.successfulAnalyses / performanceStats.totalProcessed) * 100)
+    : 0;
+    
   res.json({
     status: 'running',
     service: 'City Hall Complaint Bot',
     environment: process.env.NODE_ENV || 'production',
     stats: {
-      recentMessages: stats.recentMessages,
-      processedMessages: stats.processedMessages
+      recentMessages: messageStats.recentMessages,
+      recentImages: messageStats.recentImages,
+      processedMessages: messageStats.processedMessages,
+      dashboardUrl: `https://docs.google.com/spreadsheets/d/${process.env.SHEET_ID}/edit#gid=0`
+    },
+    performance: {
+      totalProcessed: performanceStats.totalProcessed,
+      successfulAnalyses: performanceStats.successfulAnalyses,
+      failedAnalyses: performanceStats.failedAnalyses,
+      successRate: `${successRate}%`,
+      avgResponseTime: `${performanceStats.avgResponseTime}ms`,
+      lastUpdated: performanceStats.lastUpdated.toISOString()
+    },
+    features: {
+      intelligentPairing: 'Pairs text messages with images within 60 seconds',
+      contactExtraction: 'Extracts Hebrew/English contact info from messages',
+      aiAnalysis: 'OpenRouter API with retry logic and fallback',
+      dualWebhooks: 'Supports both Meta WhatsApp and Gupshup',
+      dashboard: 'Real-time metrics in Google Sheets Dashboard'
     }
   });
 });
@@ -426,11 +658,41 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
-app.listen(PORT, () => {
+// Special endpoint to recreate dashboard in Hebrew
+app.post('/admin/recreate-dashboard', async (req, res) => {
+  try {
+    console.log('🔄 Recreating dashboard in Hebrew...');
+    await recreateDashboard();
+    res.json({ 
+      status: 'success', 
+      message: 'Dashboard recreated in Hebrew',
+      dashboardUrl: `https://docs.google.com/spreadsheets/d/${process.env.SHEET_ID}/edit#gid=0`
+    });
+  } catch (error) {
+    console.error('❌ Dashboard recreation failed:', error.message);
+    res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
+  }
+});
+
+app.listen(PORT, async () => {
   console.log(`🚀 Server live on port ${PORT}`);
   console.log(`🔒 Webhook auth: ${process.env.WEBHOOK_SECRET ? 'enabled' : 'disabled'}`);
   console.log(`⏱️ Rate limiting: ${process.env.RATE_LIMIT_MAX_REQUESTS || 10} requests per ${(process.env.RATE_LIMIT_WINDOW_MS || 60000) / 1000}s`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'production'}`);
+  
+  // Initialize dashboard on startup
+  try {
+    await initializeDashboardSheet();
+    console.log(`📊 Dashboard initialized successfully`);
+    
+    // Start periodic dashboard updates every 5 minutes
+    startPeriodicDashboardUpdates();
+  } catch (error) {
+    console.warn(`⚠️ Dashboard initialization failed:`, error.message);
+  }
 });
 
 // Graceful shutdown

@@ -6,6 +6,7 @@
 class MessageStore {
   constructor() {
     this.recentMessages = new Map();
+    this.recentImages = new Map();
     this.processedMessages = new Set();
     this.maxMessageAge = 60000; // 60 seconds
     this.maxProcessedSize = 10000; // Maximum processed IDs to track
@@ -83,7 +84,7 @@ class MessageStore {
    * Retrieves a recent message for pairing
    * @param {string} sender - Sender phone number
    * @param {number} currentTimestamp - Current message timestamp
-   * @returns {string|null} - Recent message text or null
+   * @returns {object|null} - Recent message object or null
    */
   getRecentMessage(sender, currentTimestamp) {
     if (!this.recentMessages.has(sender)) {
@@ -94,7 +95,7 @@ class MessageStore {
     
     // Check if message is within time window
     if (Math.abs(currentTimestamp - recent.timestamp) <= this.maxMessageAge) {
-      return recent.message;
+      return { text: recent.message, timestamp: recent.timestamp };
     }
     
     // Message is too old, remove it
@@ -103,25 +104,81 @@ class MessageStore {
   }
 
   /**
-   * Cleans up expired messages
+   * Stores an image for potential pairing with text messages
+   * @param {string} sender - Sender phone number
+   * @param {string} imageUrl - Image URL
+   * @param {string} caption - Image caption
+   * @param {number} timestamp - Image timestamp
+   */
+  storeImage(sender, imageUrl, caption, timestamp) {
+    if (!sender || !imageUrl) {
+      return;
+    }
+    
+    // Store with timestamp for cleanup
+    this.recentImages.set(sender, {
+      url: imageUrl,
+      caption: caption || '',
+      timestamp: timestamp || Date.now()
+    });
+  }
+
+  /**
+   * Retrieves a recent image for pairing
+   * @param {string} sender - Sender phone number
+   * @param {number} currentTimestamp - Current message timestamp
+   * @returns {object|null} - Recent image object or null
+   */
+  getRecentImage(sender, currentTimestamp) {
+    if (!this.recentImages.has(sender)) {
+      return null;
+    }
+    
+    const recent = this.recentImages.get(sender);
+    
+    // Check if image is within time window
+    if (Math.abs(currentTimestamp - recent.timestamp) <= this.maxMessageAge) {
+      return { url: recent.url, caption: recent.caption, timestamp: recent.timestamp };
+    }
+    
+    // Image is too old, remove it
+    this.recentImages.delete(sender);
+    return null;
+  }
+
+  /**
+   * Cleans up expired messages and images
    */
   cleanup() {
     try {
       const now = Date.now();
-      const expiredSenders = [];
+      const expiredMessageSenders = [];
+      const expiredImageSenders = [];
       
+      // Clean up expired text messages
       for (const [sender, data] of this.recentMessages) {
         if (now - data.timestamp > this.maxMessageAge) {
-          expiredSenders.push(sender);
+          expiredMessageSenders.push(sender);
         }
       }
       
-      for (const sender of expiredSenders) {
+      for (const sender of expiredMessageSenders) {
         this.recentMessages.delete(sender);
       }
       
-      if (expiredSenders.length > 0) {
-        console.log(`🧹 Cleaned up ${expiredSenders.length} expired messages`);
+      // Clean up expired images
+      for (const [sender, data] of this.recentImages) {
+        if (now - data.timestamp > this.maxMessageAge) {
+          expiredImageSenders.push(sender);
+        }
+      }
+      
+      for (const sender of expiredImageSenders) {
+        this.recentImages.delete(sender);
+      }
+      
+      if (expiredMessageSenders.length > 0 || expiredImageSenders.length > 0) {
+        console.log(`🧹 Cleaned up ${expiredMessageSenders.length} expired messages, ${expiredImageSenders.length} expired images`);
       }
     } catch (error) {
       console.error('❌ Error during message cleanup:', error);
@@ -135,6 +192,7 @@ class MessageStore {
   getStats() {
     return {
       recentMessages: this.recentMessages.size,
+      recentImages: this.recentImages.size,
       processedMessages: this.processedMessages.size
     };
   }
@@ -144,6 +202,7 @@ class MessageStore {
    */
   clear() {
     this.recentMessages.clear();
+    this.recentImages.clear();
     this.processedMessages.clear();
   }
 }
