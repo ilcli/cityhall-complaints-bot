@@ -10,6 +10,7 @@ import { DateTime } from 'luxon';
 import fetch from 'node-fetch';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet, initializeDashboardSheet, updateDashboardStats, recreateDashboard } from './googleSheets.js';
+import { uploadImageToDrive } from './googleDrive.js';
 import { webhookAuthMiddleware, captureRawBody } from './middleware/security.js';
 import { rateLimitMiddleware } from './middleware/rateLimiter.js';
 import { validateWebhookPayload, generateMessageId, sanitizeText, sanitizeForSheets } from './utils/validation.js';
@@ -628,6 +629,25 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
     console.log(`🤖 AI analysis result:`, analysis);
 
+    // Upload image to Google Drive if present
+    let driveImageUrl = null;
+    if (imageUrl) {
+      console.log(`🖼️ Processing image upload to Google Drive...`);
+      const driveResult = await uploadImageToDrive(imageUrl, {
+        sender,
+        timestamp,
+        messageId
+      });
+      
+      if (driveResult) {
+        driveImageUrl = driveResult.shareableLink;
+        console.log(`✅ Image uploaded to Drive: ${driveImageUrl}`);
+      } else {
+        console.warn(`⚠️ Could not upload image to Drive, using original URL`);
+        driveImageUrl = imageUrl; // Fallback to original URL
+      }
+    }
+
     // Prioritize extracted info over sender data and AI analysis
     const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
     const finalPhone = extractedInfo.phone || formatIsraeliPhoneNumber(sender);
@@ -640,15 +660,15 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'תאריך ושעה': timestamp,
       'טלפון': finalPhone,
-      'קישור לתמונה': imageUrl || '',
+      'קישור לתמונה': driveImageUrl || '',
       'סוג הפנייה': sanitizeForSheets(analysis['סוג הפנייה'] || ''),
       'מחלקה אחראית': sanitizeForSheets(analysis['מחלקה אחראית'] || ''),
       'source': `${source}:${confidence}`,
     };
 
     // Log specific image URL status before sending to sheet
-    if (imageUrl) {
-      console.log(`🖼️ Image URL will be stored in sheet: ${imageUrl}`);
+    if (driveImageUrl) {
+      console.log(`🖼️ Google Drive image URL will be stored in sheet: ${driveImageUrl}`);
     } else {
       console.log(`⚠️ No image URL available for storage`);
     }
