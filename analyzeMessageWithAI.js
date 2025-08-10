@@ -258,8 +258,14 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
     'בעל', 'בעלת', 'בן', 'בת' // owner/son/daughter
   ];
   
+  // Clean the detected name more thoroughly (remove punctuation, prefixes)
+  const cleanedName = detectedName.toLowerCase().trim()
+    .replace(/^ה/, '')  // Remove Hebrew definite article prefix
+    .replace(/[.,!?;:'"()[\]{}]/g, '')  // Remove common punctuation
+    .trim();
+  
   const isSuspicious = suspiciousWords.some(word => 
-    detectedName.toLowerCase().trim() === word.toLowerCase()
+    cleanedName === word.toLowerCase()
   );
   
   // If AI didn't find a name or found a suspicious one, use backup extraction
