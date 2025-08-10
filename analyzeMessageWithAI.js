@@ -181,6 +181,7 @@ export async function analyzeComplaint({ message, timestamp, imageUrl }, retryCo
     const enhancedResponse = validateAndEnhanceResponse(parseResult.data, { message, timestamp, imageUrl });
     
     console.log('🔧 Enhanced AI response:', {
+      name: enhancedResponse['שם הפונה'],
       category: enhancedResponse['קטגוריה'],
       department: enhancedResponse['מחלקה אחראית'], 
       urgency: enhancedResponse['רמת דחיפות'],
@@ -239,6 +240,8 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
   // Smart name extraction - try AI first, then fallback to pattern matching
   let detectedName = enhanced['שם הפונה'] || '';
   
+  console.log(`🔍 AI detected name for validation: "${detectedName}"`);
+  
   // Check if AI found a suspicious name (common Hebrew verbs/words that aren't names)
   const suspiciousWords = [
     // Negations
@@ -267,6 +270,9 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
   const isSuspicious = suspiciousWords.some(word => 
     cleanedName === word.toLowerCase()
   );
+  
+  console.log(`🔍 Cleaned name: "${cleanedName}"`);
+  console.log(`🔍 Is suspicious: ${isSuspicious}`);
   
   // If AI didn't find a name or found a suspicious one, use backup extraction
   if (!detectedName || isSuspicious) {
