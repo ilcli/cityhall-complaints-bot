@@ -457,7 +457,7 @@ async function ensureComplaintsSheet(sheets) {
         'תוכן הפנייה', 
         'שם הפונה',
         'טלפון',
-        'תמונה',
+        'קישור לתמונה',
         'קטגוריה',
         'סטטוס טיפול',
         'הערות',
@@ -504,7 +504,7 @@ export async function appendToSheet(row) {
       row['תוכן הפנייה'] || '',
       row['שם הפונה'] || '',
       row['טלפון'] || '',
-      row['תמונה'] || '', // Base64 image data
+      row['קישור לתמונה'] || '', // Image URL
       row['קטגוריה'] || '',
       row['סטטוס טיפול'] || 'טרם טופל', // Default status
       row['הערות'] || '', // Staff notes

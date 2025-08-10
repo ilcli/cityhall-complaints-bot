@@ -8,10 +8,8 @@ import bodyParser from 'body-parser';
 import { DateTime } from 'luxon';
 
 import fetch from 'node-fetch';
-import sharp from 'sharp';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet, initializeDashboardSheet, updateDashboardStats, recreateDashboard } from './googleSheets.js';
-// import { uploadImageToDrive } from './googleDrive.js'; // Replaced with Base64 storage
 import { webhookAuthMiddleware, captureRawBody } from './middleware/security.js';
 import { rateLimitMiddleware } from './middleware/rateLimiter.js';
 import { validateWebhookPayload, generateMessageId, sanitizeText, sanitizeForSheets } from './utils/validation.js';
@@ -34,107 +32,6 @@ let performanceStats = {
  * @param {string} mediaId - Media ID from WhatsApp
  * @returns {string|null} - Media URL or null if failed
  */
-/**
- * Converts image from Meta URL to Base64 with resizing for Google Sheets storage
- * @param {string} imageUrl - Image URL from Meta API
- * @returns {string|null} - Base64 encoded image or null if failed
- */
-async function convertImageToBase64(imageUrl) {
-  if (!imageUrl) {
-    console.warn('⚠️ No image URL provided for Base64 conversion');
-    return null;
-  }
-  
-  try {
-    const accessToken = process.env.META_ACCESS_TOKEN;
-    const headers = {};
-    
-    // Add authorization if we have a Meta access token
-    if (accessToken) {
-      headers['Authorization'] = `Bearer ${accessToken}`;
-    }
-    
-    console.log(`📥 Downloading image for Base64 conversion: ${imageUrl}`);
-    const response = await fetch(imageUrl, { 
-      headers,
-      timeout: 15000 // 15 second timeout
-    });
-    
-    if (!response.ok) {
-      console.error(`❌ Failed to download image: ${response.status} ${response.statusText}`);
-      return null;
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    let buffer = Buffer.from(arrayBuffer);
-    const originalSize = buffer.length;
-    console.log(`📏 Original image size: ${originalSize} bytes`);
-    
-    // Google Sheets cell limit (max ~50KB for cell content)
-    const maxSize = 50 * 1024; // 50KB limit
-    
-    // If image is too large, resize it
-    if (originalSize > maxSize) {
-      console.log(`📐 Image too large (${originalSize} bytes), resizing to fit ${maxSize} bytes...`);
-      
-      try {
-        // Try different resize strategies until we get under the limit
-        let resizedBuffer = null;
-        let quality = 80;
-        let width = 800;
-        
-        // Strategy 1: Reduce dimensions and quality
-        while (quality >= 20 && width >= 200) {
-          resizedBuffer = await sharp(buffer)
-            .resize(width, null, { 
-              withoutEnlargement: true,
-              fit: 'inside'
-            })
-            .jpeg({ quality, progressive: true })
-            .toBuffer();
-            
-          console.log(`📐 Trying width=${width}, quality=${quality}%, size=${resizedBuffer.length} bytes`);
-          
-          if (resizedBuffer.length <= maxSize) {
-            buffer = resizedBuffer;
-            console.log(`✅ Successfully resized: ${originalSize} → ${buffer.length} bytes (${Math.round((buffer.length/originalSize)*100)}% of original)`);
-            break;
-          }
-          
-          // Adjust parameters for next attempt
-          if (width > 400) {
-            width -= 200;
-          } else {
-            quality -= 20;
-            width = 800; // Reset width and reduce quality
-          }
-        }
-        
-        // If still too large after all attempts
-        if (resizedBuffer && resizedBuffer.length > maxSize) {
-          console.warn(`⚠️ Could not resize image to fit ${maxSize} bytes limit (final size: ${resizedBuffer.length} bytes)`);
-          console.warn(`   Will store image URL instead of Base64 data`);
-          return null;
-        }
-        
-      } catch (resizeError) {
-        console.error(`❌ Failed to resize image: ${resizeError.message}`);
-        console.warn(`   Will store image URL instead of Base64 data`);
-        return null;
-      }
-    }
-    
-    const base64String = buffer.toString('base64');
-    const dataUri = `data:image/jpeg;base64,${base64String}`;
-    
-    console.log(`✅ Image converted to Base64 (${buffer.length} bytes, ${originalSize > maxSize ? 'resized from ' + originalSize + ' bytes' : 'original size'})`);
-    return dataUri;
-    
-  } catch (error) {
-    console.error('❌ Failed to convert image to Base64:', error.message);
-    return null;
-  }
-}
 
 async function getMediaUrlFromMeta(mediaId) {
   console.log(`🔍 getMediaUrlFromMeta called with mediaId: "${mediaId}"`);
@@ -852,41 +749,8 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
     const analysis = await analyzeComplaint({ message: messageText, timestamp, imageUrl });
     console.log(`🤖 AI analysis result:`, analysis);
 
-    // Convert image to Base64 for direct storage in Google Sheets
-    let base64Image = null;
-    let imageUrlForStorage = null;
-    
-    console.log(`🔍 DEBUG: Image processing status check:`);
-    console.log(`   imageUrl: "${imageUrl}"`);
-    console.log(`   imageUrl type: ${typeof imageUrl}`);
-    console.log(`   imageUrl truthy: ${!!imageUrl}`);
-    
-    if (imageUrl) {
-      console.log(`🖼️ Processing image conversion to Base64...`);
-      console.log(`🖼️ Calling convertImageToBase64 with URL: ${imageUrl}`);
-      
-      try {
-        base64Image = await convertImageToBase64(imageUrl);
-        console.log(`🖼️ convertImageToBase64 returned: ${base64Image ? 'SUCCESS' : 'NULL/FAILED'}`);
-      } catch (base64Error) {
-        console.error(`❌ convertImageToBase64 threw error:`, base64Error.message);
-        console.error(`   Error stack:`, base64Error.stack);
-      }
-      
-      if (base64Image) {
-        console.log(`✅ Image converted to Base64 for inline storage (length: ${base64Image.length})`);
-        imageUrlForStorage = imageUrl; // Keep original URL as backup
-      } else {
-        console.warn(`⚠️ Could not convert image to Base64, storing URL only`);
-        imageUrlForStorage = imageUrl; // Store original URL
-      }
-    } else {
-      console.log(`🔍 NO IMAGE URL - investigating why:`);
-      console.log(`   messageType: ${messageType}`);
-      console.log(`   messagePayload.id: ${messagePayload?.id}`);
-      console.log(`   messagePayload.url: ${messagePayload?.url}`);
-      console.log(`   messagePayload.link: ${messagePayload?.link}`);
-    }
+    // Store image URL for later processing with Microsoft Graph API
+    let imageUrlForStorage = imageUrl || '';
 
     // Prioritize extracted info over sender data and AI analysis
     const finalName = extractedInfo.name || analysis['שם הפונה'] || '';
@@ -898,7 +762,7 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
       'תוכן הפנייה': sanitizeForSheets(analysis['תוכן הפנייה'] || messageText),
       'שם הפונה': sanitizeForSheets(finalName),
       'טלפון': finalPhone,
-      'תמונה': base64Image || '', // Base64 image data for inline display
+      'קישור לתמונה': imageUrlForStorage, // Image URL for future processing
       'קטגוריה': sanitizeForSheets(analysis['קטגוריה'] || ''),
       'סטטוס טיפול': 'טרם טופל', // Default status
       'הערות': '', // Empty notes field for staff
@@ -906,13 +770,11 @@ async function processMessageInBackground({ messageType, sender, timestampMs, me
       'גורם מטפל': '' // Assigned staff member (empty initially)
     };
 
-    // Log specific image storage status before sending to sheet
-    if (base64Image) {
-      console.log(`🖼️ Base64 image data will be stored inline in sheet (${base64Image.length} chars)`);
-    } else if (imageUrlForStorage) {
+    // Log image storage status
+    if (imageUrlForStorage) {
       console.log(`🖼️ Image URL will be stored in sheet: ${imageUrlForStorage}`);
     } else {
-      console.log(`⚠️ No image data available for storage`);
+      console.log(`📝 No image attached to this message`);
     }
     
     console.log(`📝 Row data to be sent to sheet:`, row);
