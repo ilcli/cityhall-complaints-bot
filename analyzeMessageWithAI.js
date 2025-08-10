@@ -239,9 +239,31 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
   // Smart name extraction - try AI first, then fallback to pattern matching
   let detectedName = enhanced['שם הפונה'] || '';
   
+  // Check if AI found a suspicious name (common Hebrew verbs/words that aren't names)
+  const suspiciousWords = [
+    // Negations
+    'לא', 'אין', 'don\'t', 'can\'t', 'won\'t',
+    // Pronouns
+    'אני', 'אתה', 'את', 'הוא', 'היא',
+    // Common verbs that follow "אני" (I am...)
+    'מתגורר', 'גר', 'גרה', 'מתגוררת', // living/residing
+    'עובד', 'עובדת', 'עושה', // working/doing  
+    'רוצה', 'רוצי', 'צריך', 'צריכה', // wanting/needing
+    'אוהב', 'אוהבת', 'מחפש', 'מחפשת', // loving/searching
+    'כותב', 'כותבת', 'שולח', 'שולחת', // writing/sending
+    'מבקש', 'מבקשת', 'פונה', 'פונית', // requesting/turning to
+    'מדווח', 'מדווחת', 'מתלונן', 'מתלוננת', // reporting/complaining
+    // Common descriptive words
+    'תושב', 'תושבת', 'אזרח', 'אזרחית', // resident/citizen
+    'בעל', 'בעלת', 'בן', 'בת' // owner/son/daughter
+  ];
+  
+  const isSuspicious = suspiciousWords.some(word => 
+    detectedName.toLowerCase().trim() === word.toLowerCase()
+  );
+  
   // If AI didn't find a name or found a suspicious one, use backup extraction
-  if (!detectedName || 
-      ['לא', 'don\'t', 'can\'t', 'won\'t', 'אין', 'אני'].includes(detectedName.toLowerCase().trim())) {
+  if (!detectedName || isSuspicious) {
     
     console.log(`🔍 AI name detection failed or suspicious ("${detectedName}"), trying backup extraction...`);
     const backupName = extractHebrewNameFromMessage(message);
@@ -357,10 +379,24 @@ function extractNameFromSegment(segment) {
   
   // Common Hebrew words to ignore (not names)
   const stopWords = [
+    // Pronouns
     'אני', 'אתה', 'את', 'הוא', 'היא', 'אנחנו', 'אתם', 'אתן', 'הם', 'הן',
+    // Question words
     'זה', 'זאת', 'זו', 'אלה', 'כל', 'כמה', 'מה', 'איפה', 'מתי', 'איך',
+    // Common words
     'לא', 'אין', 'כן', 'גם', 'רק', 'עוד', 'כבר', 'עדיין', 'בבקשה',
-    'שלום', 'הי', 'חברים', 'תושבים', 'סובלים', 'מצליח', 'אמור', 'אומר'
+    'שלום', 'הי', 'חברים', 'תושבים', 'סובלים', 'מצליח', 'אמור', 'אומר',
+    // Common verbs that follow "אני" (I am...)
+    'מתגורר', 'גר', 'גרה', 'מתגוררת', // living/residing
+    'עובד', 'עובדת', 'עושה', // working/doing  
+    'רוצה', 'רוצי', 'צריך', 'צריכה', // wanting/needing
+    'אוהב', 'אוהבת', 'מחפש', 'מחפשת', // loving/searching
+    'כותב', 'כותבת', 'שולח', 'שולחת', // writing/sending
+    'מבקש', 'מבקשת', 'פונה', 'פונית', // requesting/turning to
+    'מדווח', 'מדווחת', 'מתלונן', 'מתלוננת', // reporting/complaining
+    // Descriptive words
+    'תושב', 'תושבת', 'אזרח', 'אזרחית', // resident/citizen
+    'בעל', 'בעלת', 'בן', 'בת' // owner/son/daughter
   ];
   
   // Try different combinations of the first few words, preferring longer names
