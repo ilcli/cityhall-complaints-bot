@@ -8,6 +8,7 @@ import bodyParser from 'body-parser';
 import { DateTime } from 'luxon';
 
 import fetch from 'node-fetch';
+import sharp from 'sharp';
 import { analyzeComplaint } from './analyzeMessageWithAI.js';
 import { appendToSheet, initializeDashboardSheet, updateDashboardStats, recreateDashboard } from './googleSheets.js';
 // import { uploadImageToDrive } from './googleDrive.js'; // Replaced with Base64 storage
@@ -34,7 +35,7 @@ let performanceStats = {
  * @returns {string|null} - Media URL or null if failed
  */
 /**
- * Converts image from Meta URL to Base64 for direct storage in Google Sheets
+ * Converts image from Meta URL to Base64 with resizing for Google Sheets storage
  * @param {string} imageUrl - Image URL from Meta API
  * @returns {string|null} - Base64 encoded image or null if failed
  */
@@ -65,21 +66,68 @@ async function convertImageToBase64(imageUrl) {
     }
     
     const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    let buffer = Buffer.from(arrayBuffer);
+    const originalSize = buffer.length;
+    console.log(`📏 Original image size: ${originalSize} bytes`);
     
-    // Check size limits for Google Sheets (max ~50KB for cell content)
+    // Google Sheets cell limit (max ~50KB for cell content)
     const maxSize = 50 * 1024; // 50KB limit
-    if (buffer.length > maxSize) {
-      console.warn(`⚠️ Image too large for Base64 storage: ${buffer.length} bytes > ${maxSize} bytes`);
-      console.warn(`   Will store image URL instead of Base64 data`);
-      return null;
+    
+    // If image is too large, resize it
+    if (originalSize > maxSize) {
+      console.log(`📐 Image too large (${originalSize} bytes), resizing to fit ${maxSize} bytes...`);
+      
+      try {
+        // Try different resize strategies until we get under the limit
+        let resizedBuffer = null;
+        let quality = 80;
+        let width = 800;
+        
+        // Strategy 1: Reduce dimensions and quality
+        while (quality >= 20 && width >= 200) {
+          resizedBuffer = await sharp(buffer)
+            .resize(width, null, { 
+              withoutEnlargement: true,
+              fit: 'inside'
+            })
+            .jpeg({ quality, progressive: true })
+            .toBuffer();
+            
+          console.log(`📐 Trying width=${width}, quality=${quality}%, size=${resizedBuffer.length} bytes`);
+          
+          if (resizedBuffer.length <= maxSize) {
+            buffer = resizedBuffer;
+            console.log(`✅ Successfully resized: ${originalSize} → ${buffer.length} bytes (${Math.round((buffer.length/originalSize)*100)}% of original)`);
+            break;
+          }
+          
+          // Adjust parameters for next attempt
+          if (width > 400) {
+            width -= 200;
+          } else {
+            quality -= 20;
+            width = 800; // Reset width and reduce quality
+          }
+        }
+        
+        // If still too large after all attempts
+        if (resizedBuffer && resizedBuffer.length > maxSize) {
+          console.warn(`⚠️ Could not resize image to fit ${maxSize} bytes limit (final size: ${resizedBuffer.length} bytes)`);
+          console.warn(`   Will store image URL instead of Base64 data`);
+          return null;
+        }
+        
+      } catch (resizeError) {
+        console.error(`❌ Failed to resize image: ${resizeError.message}`);
+        console.warn(`   Will store image URL instead of Base64 data`);
+        return null;
+      }
     }
     
     const base64String = buffer.toString('base64');
-    const dataUri = `data:${contentType};base64,${base64String}`;
+    const dataUri = `data:image/jpeg;base64,${base64String}`;
     
-    console.log(`✅ Image converted to Base64 (${buffer.length} bytes, type: ${contentType})`);
+    console.log(`✅ Image converted to Base64 (${buffer.length} bytes, ${originalSize > maxSize ? 'resized from ' + originalSize + ' bytes' : 'original size'})`);
     return dataUri;
     
   } catch (error) {
