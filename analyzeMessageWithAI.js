@@ -53,8 +53,23 @@ export async function analyzeComplaint({ message, timestamp, imageUrl }, retryCo
 - גבוהה: פוגע בביטחון או תנועה (תאורה חסרה, מדרכות שבורות)
 - רגילה: מטרדים או בעיות שגרתיות (זבל, ניקיון, גינון)
 
+🔍 זיהוי שם הפונה - חשוב מאוד:
+רוב ההודעות בעברית מסתיימות עם חתימת השולח. חפש שמות פרטיים ומשפחה בסוף ההודעה.
+
+דוגמאות נכונות לזיהוי שם:
+- "...כל התושבים סובלים, מושיקו טורינו" → שם: "מושיקו טורינו"
+- "...זה בעיה רצינית, שרה כהן" → שם: "שרה כהן"
+- "...צריך לטפל בזה בדחיפות דודו לוי" → שם: "דודו לוי"
+
+❌ אל תזהה כשמות:
+- מילות שלילה: לא, אין, לא מצליח, don't, can't
+- מילים נפוצות: אני, אתה, זה, כל, הם
+- פעלים ותארים: רוצה, חושב, גדול, קטן
+
+💡 כלל זהב: אם יש שני מילים עבריות שנראות כמו שם פרטי + משפחה בסוף ההודעה, זה כנראה השם האמיתי.
+
 החזר תשובה בפורמט JSON עם השדות הבאים:
-- "שם הפונה": אם נמסר בגוף ההודעה (אחרת ריק)
+- "שם הפונה": השם האמיתי מסוף ההודעה (או ריק אם לא מזוהה)
 - "קטגוריה": סיווג מדויק מהרשימה למעלה
 - "רמת דחיפות": רגילה / גבוהה / מיידית לפי המסוכנות
 - "תוכן הפנייה": הטקסט המקורי של הפנייה
@@ -221,8 +236,26 @@ const categoryToDepartment = {
 function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }) {
   const enhanced = { ...aiResponse };
   
+  // Smart name extraction - try AI first, then fallback to pattern matching
+  let detectedName = enhanced['שם הפונה'] || '';
+  
+  // If AI didn't find a name or found a suspicious one, use backup extraction
+  if (!detectedName || 
+      ['לא', 'don\'t', 'can\'t', 'won\'t', 'אין', 'אני'].includes(detectedName.toLowerCase().trim())) {
+    
+    console.log(`🔍 AI name detection failed or suspicious ("${detectedName}"), trying backup extraction...`);
+    const backupName = extractHebrewNameFromMessage(message);
+    if (backupName) {
+      detectedName = backupName;
+      console.log(`✅ Backup name extraction found: "${backupName}"`);
+    } else {
+      detectedName = '';
+      console.log(`⚠️ No name detected by backup extraction either`);
+    }
+  }
+  
   // Ensure all required fields exist
-  enhanced['שם הפונה'] = enhanced['שם הפונה'] || '';
+  enhanced['שם הפונה'] = detectedName;
   enhanced['טלפון'] = enhanced['טלפון'] || '';
   enhanced['תוכן הפנייה'] = enhanced['תוכן הפנייה'] || message || '';
   enhanced['תאריך ושעה'] = enhanced['תאריך ושעה'] || timestamp || '';
@@ -255,6 +288,69 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
   }
   
   return enhanced;
+}
+
+/**
+ * Extracts Hebrew names from end of message using intelligent pattern matching
+ */
+function extractHebrewNameFromMessage(text) {
+  if (!text) return null;
+  
+  // Remove common endings and clean text
+  const cleanText = text.trim().replace(/[.!?,]$/, '');
+  
+  // Look for potential names at the end (last 1-4 words)
+  const words = cleanText.split(/\s+/);
+  const lastWords = words.slice(-4); // Check last 4 words maximum
+  
+  // Common Hebrew words to ignore (not names)
+  const stopWords = [
+    'אני', 'אתה', 'את', 'הוא', 'היא', 'אנחנו', 'אתם', 'אתן', 'הם', 'הן',
+    'זה', 'זאת', 'זו', 'אלה', 'כל', 'כמה', 'מה', 'איפה', 'מתי', 'איך',
+    'לא', 'אין', 'כן', 'גם', 'רק', 'עוד', 'כבר', 'עדיין', 'בבקשה',
+    'תודה', 'שלום', 'הי', 'חברים', 'תושבים', 'סובלים', 'מצליח'
+  ];
+  
+  // Hebrew name patterns - look for 1-3 consecutive Hebrew words that could be names
+  for (let i = lastWords.length - 1; i >= Math.max(0, lastWords.length - 3); i--) {
+    const potentialName = lastWords.slice(i).join(' ').trim();
+    
+    // Skip if too short or contains numbers/punctuation
+    if (potentialName.length < 2 || /[0-9!@#$%^&*()_+={}|:"<>?[\]\\;',./]/.test(potentialName)) {
+      continue;
+    }
+    
+    // Skip if contains stop words
+    if (stopWords.some(word => potentialName.includes(word))) {
+      continue;
+    }
+    
+    // Check if it's mostly Hebrew characters and looks like a name
+    const hebrewChars = (potentialName.match(/[\u0590-\u05FF]/g) || []).length;
+    const totalChars = potentialName.replace(/\s/g, '').length;
+    
+    if (hebrewChars > 0 && hebrewChars / totalChars > 0.7) {
+      // Check if it has name-like structure (1-3 words, proper length)
+      const nameWords = potentialName.split(/\s+/).filter(w => w.length > 0);
+      
+      if (nameWords.length >= 1 && nameWords.length <= 3 && 
+          nameWords.every(word => word.length >= 2 && word.length <= 15)) {
+        
+        // Additional validation: names usually don't end with common verb/noun endings
+        const commonEndings = ['ים', 'ות', 'תי', 'נו', 'תם', 'ה', 'וש', 'יש'];
+        const hasCommonEnding = commonEndings.some(ending => 
+          nameWords.some(word => word.endsWith(ending) && word.length > ending.length + 1)
+        );
+        
+        if (!hasCommonEnding) {
+          console.log(`🔍 Detected potential Hebrew name: "${potentialName}"`);
+          return potentialName;
+        }
+      }
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -299,8 +395,14 @@ function createFallbackResponse({ message, timestamp, imageUrl }) {
   const category = detectedCategory || 'כללי';
   const department = categoryToDepartment[category] || 'לא זוהתה';
   
+  // Try to extract name even in fallback
+  const detectedName = extractHebrewNameFromMessage(message);
+  if (detectedName) {
+    console.log(`🔍 Fallback name extraction found: "${detectedName}"`);
+  }
+  
   return {
-    'שם הפונה': '',
+    'שם הפונה': detectedName || '',
     'קטגוריה': category,
     'רמת דחיפות': 'רגילה',
     'תוכן הפנייה': message || '',
