@@ -296,61 +296,140 @@ function validateAndEnhanceResponse(aiResponse, { message, timestamp, imageUrl }
 function extractHebrewNameFromMessage(text) {
   if (!text) return null;
   
-  // Remove common endings and clean text
-  const cleanText = text.trim().replace(/[.!?,]$/, '');
+  console.log(`🔍 Extracting Hebrew name from: "${text}"`);
   
-  // Look for potential names at the end (last 1-4 words)
-  const words = cleanText.split(/\s+/);
-  const lastWords = words.slice(-4); // Check last 4 words maximum
+  // First, try to find names after common Hebrew signature patterns
+  const signaturePatterns = [
+    'תודה רבה,',    // Thank you very much,
+    'תודה רבה',     // Thank you very much
+    'בברכה,',       // With regards,
+    'בברכה',        // With regards  
+    'לכבוד,',       // Respectfully,
+    'לכבוד',        // Respectfully
+    'בתודה,',       // With thanks,
+    'בתודה'         // With thanks
+  ];
+  
+  // Look for signature patterns and extract names following them
+  for (const pattern of signaturePatterns) {
+    const patternIndex = text.lastIndexOf(pattern);
+    if (patternIndex !== -1) {
+      const afterPattern = text.substring(patternIndex + pattern.length).trim();
+      console.log(`🎯 Found signature pattern "${pattern}", text after: "${afterPattern}"`);
+      
+      const extractedName = extractNameFromSegment(afterPattern);
+      if (extractedName) {
+        console.log(`✅ Extracted name after signature pattern: "${extractedName}"`);
+        return extractedName;
+      }
+    }
+  }
+  
+  // Fallback: Split text by punctuation and check segments
+  const segments = text.split(/[.!?;,\n\r]+/).map(s => s.trim()).filter(s => s.length > 0);
+  console.log(`📋 Analyzing ${segments.length} text segments:`, segments);
+  
+  // Check the last few segments for potential names
+  const lastSegments = segments.slice(-3);
+  
+  for (const segment of lastSegments.reverse()) {
+    const extractedName = extractNameFromSegment(segment);
+    if (extractedName) {
+      console.log(`✅ Extracted name from segment "${segment}": "${extractedName}"`);
+      return extractedName;
+    }
+  }
+  
+  console.log(`❌ No Hebrew name found in message`);
+  return null;
+}
+
+/**
+ * Helper function to extract name from a text segment
+ */
+function extractNameFromSegment(segment) {
+  if (!segment || segment.length < 2) return null;
+  
+  console.log(`🔍 Analyzing segment: "${segment}"`);
+  
+  // Clean the segment and split into words
+  const words = segment.split(/\s+/).map(word => word.trim()).filter(word => word.length > 0);
   
   // Common Hebrew words to ignore (not names)
   const stopWords = [
     'אני', 'אתה', 'את', 'הוא', 'היא', 'אנחנו', 'אתם', 'אתן', 'הם', 'הן',
     'זה', 'זאת', 'זו', 'אלה', 'כל', 'כמה', 'מה', 'איפה', 'מתי', 'איך',
     'לא', 'אין', 'כן', 'גם', 'רק', 'עוד', 'כבר', 'עדיין', 'בבקשה',
-    'תודה', 'שלום', 'הי', 'חברים', 'תושבים', 'סובלים', 'מצליח'
+    'שלום', 'הי', 'חברים', 'תושבים', 'סובלים', 'מצליח', 'אמור', 'אומר'
   ];
   
-  // Hebrew name patterns - look for 1-3 consecutive Hebrew words that could be names
-  for (let i = lastWords.length - 1; i >= Math.max(0, lastWords.length - 3); i--) {
-    const potentialName = lastWords.slice(i).join(' ').trim();
+  // Try different combinations of the first few words, preferring longer names
+  let bestCandidate = null;
+  
+  for (let wordCount = Math.min(3, words.length); wordCount >= 1; wordCount--) {
+    const candidateWords = words.slice(0, wordCount);
     
-    // Skip if too short or contains numbers/punctuation
-    if (potentialName.length < 2 || /[0-9!@#$%^&*()_+={}|:"<>?[\]\\;',./]/.test(potentialName)) {
+    // Clean each word: remove numbers and punctuation while preserving Hebrew
+    const cleanedWords = candidateWords.map(word => {
+      // Remove phone numbers and other attachments (numbers, hyphens, etc.)
+      return word.replace(/[0-9\-()]+$/g, '').replace(/[.!?,;:]+$/g, '').trim();
+    }).filter(word => word.length >= 2);
+    
+    if (cleanedWords.length === 0) continue;
+    
+    const candidateName = cleanedWords.join(' ').trim();
+    console.log(`🧐 Testing candidate: "${candidateName}"`);
+    
+    // Skip if contains stop words (match whole words only)
+    const nameWords = candidateName.split(/\s+/);
+    const hasStopWord = nameWords.some(nameWord => 
+      stopWords.some(stopWord => nameWord.toLowerCase() === stopWord.toLowerCase())
+    );
+    if (hasStopWord) {
+      console.log(`❌ Contains stop word, skipping`);
       continue;
     }
     
-    // Skip if contains stop words
-    if (stopWords.some(word => potentialName.includes(word))) {
-      continue;
-    }
+    // Check if it's mostly Hebrew characters
+    const hebrewChars = (candidateName.match(/[\u0590-\u05FF]/g) || []).length;
+    const totalChars = candidateName.replace(/\s/g, '').length;
+    const hebrewRatio = totalChars > 0 ? hebrewChars / totalChars : 0;
     
-    // Check if it's mostly Hebrew characters and looks like a name
-    const hebrewChars = (potentialName.match(/[\u0590-\u05FF]/g) || []).length;
-    const totalChars = potentialName.replace(/\s/g, '').length;
+    console.log(`📊 Hebrew ratio: ${hebrewRatio} (${hebrewChars}/${totalChars})`);
     
-    if (hebrewChars > 0 && hebrewChars / totalChars > 0.7) {
-      // Check if it has name-like structure (1-3 words, proper length)
-      const nameWords = potentialName.split(/\s+/).filter(w => w.length > 0);
+    if (hebrewRatio > 0.8 && totalChars >= 2) {
+      // Validate name structure
+      const nameWords = candidateName.split(/\s+/).filter(w => w.length > 0);
       
       if (nameWords.length >= 1 && nameWords.length <= 3 && 
-          nameWords.every(word => word.length >= 2 && word.length <= 15)) {
+          nameWords.every(word => word.length >= 2 && word.length <= 20)) {
         
-        // Additional validation: names usually don't end with common verb/noun endings
-        const commonEndings = ['ים', 'ות', 'תי', 'נו', 'תם', 'ה', 'וש', 'יש'];
+        // Additional validation: avoid common verb/noun endings that indicate it's not a name
+        const commonEndings = ['ים', 'ות', 'תי', 'נו', 'תם', 'יש'];
         const hasCommonEnding = commonEndings.some(ending => 
-          nameWords.some(word => word.endsWith(ending) && word.length > ending.length + 1)
+          nameWords.some(word => word.endsWith(ending) && word.length > ending.length + 2)
         );
         
         if (!hasCommonEnding) {
-          console.log(`🔍 Detected potential Hebrew name: "${potentialName}"`);
-          return potentialName;
+          console.log(`✅ Valid Hebrew name found: "${candidateName}"`);
+          bestCandidate = candidateName;
+          // Don't return immediately - check if there's a longer valid name
+          // Only return the longer name if we found one
+          if (nameWords.length > 1) {
+            return candidateName;
+          }
+        } else {
+          console.log(`❌ Has common verb/noun ending, likely not a name`);
         }
+      } else {
+        console.log(`❌ Invalid name structure`);
       }
+    } else {
+      console.log(`❌ Insufficient Hebrew characters`);
     }
   }
   
-  return null;
+  return bestCandidate;
 }
 
 /**
